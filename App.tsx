@@ -7,12 +7,12 @@ import {
   GradeEngineConfig,
   DistributionResult
 } from './types';
-import { DEFAULT_CONFIG } from './constants';
+import defaultConfig from './config.json';
 import { calculateDistributions } from './services/gradeEngine';
 
 const App: React.FC = () => {
   const [scores, setScores] = useState<number[]>([]);
-  const [config, setConfig] = useState<GradeEngineConfig>(DEFAULT_CONFIG);
+  const [config, setConfig] = useState<GradeEngineConfig>(defaultConfig as GradeEngineConfig);
   const [results, setResults] = useState<DistributionResult[]>([]);
   const [isCalculated, setIsCalculated] = useState(false);
   const [isComputing, setIsComputing] = useState(false);

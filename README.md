@@ -16,5 +16,9 @@ View your app in AI Studio: https://ai.studio/apps/drive/1o9uyiFpCfTXVw-wvEdKDhl
 1. Install dependencies:
    `npm install`
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+4. Define constraints in [config.json](config.json)
+5. Run the app:
    `npm run dev`
+
+## Generalized Config
+The app now uses a JSON-based configuration for grading scales and constraints. You can edit `config.json` to change the grading system.

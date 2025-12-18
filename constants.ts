@@ -1,24 +1,34 @@
+import { GradeEngineConfig } from './types';
 
-import { GradeCategory } from './types';
+export const EMORY_LAW_CONFIG: GradeEngineConfig = {
+  grades: [
+    { label: 'A+', value: 4.333 },
+    { label: 'A', value: 4.000 },
+    { label: 'A-', value: 3.667 },
+    { label: 'B+', value: 3.333 },
+    { label: 'B', value: 3.000 },
+    { label: 'B-', value: 2.667 },
+    { label: 'C+', value: 2.333 },
+    { label: 'C', value: 2.000 },
+    { label: 'C-', value: 1.667 },
+    { label: 'D+', value: 1.333 },
+    { label: 'D', value: 1.000 },
+    { label: 'F', value: 0.000 },
+  ],
+  aggregate: {
+    mean: { min: 3.28, max: 3.32 }
+  },
+  distribution: [
+    {
+      labels: ['A', 'A-'],
+      percentRange: { min: 7, max: 16 }
+    },
+    {
+      labels: ['B+'],
+      percentRange: { min: 0, max: 27 } // Example: "no more than 27% Bs" might mean B+ here or group
+    }
+  ],
+  targetResultCount: 3
+};
 
-export const DEFAULT_CATEGORIES: GradeCategory[] = [
-  { label: 'A+', gpaValue: 4.333, targetPercent: 4.0 },
-  { label: 'A', gpaValue: 4.000, targetPercent: 8.0 },
-  { label: 'A-', gpaValue: 3.667, targetPercent: 20.0 },
-  { label: 'B+', gpaValue: 3.333, targetPercent: 33.0 },
-  { label: 'B', gpaValue: 3.000, targetPercent: 20.0 },
-  { label: 'B-', gpaValue: 2.667, targetPercent: 10.0 },
-  { label: 'C+', gpaValue: 2.333, targetPercent: 3.0 },
-  { label: 'C', gpaValue: 2.000, targetPercent: 1.0 },
-  { label: 'C-', gpaValue: 1.667, targetPercent: 0.5 },
-  { label: 'D+', gpaValue: 1.333, targetPercent: 0.2 },
-  { label: 'D', gpaValue: 1.000, targetPercent: 0.2 },
-  { label: 'F', gpaValue: 0.000, targetPercent: 0.1 },
-];
-
-export const DEFAULT_TARGET_MEAN = 3.30;
-/**
- * Hard limit: The mean MUST be between 3.28 and 3.32.
- * Setting tolerance to 0.02 strictly enforces 3.30 +/- 0.02.
- */
-export const DEFAULT_TOLERANCE = 0.02;
+export const DEFAULT_CONFIG = EMORY_LAW_CONFIG;

@@ -1,8 +1,26 @@
+export interface Range {
+  min?: number;
+  max?: number;
+}
 
-export interface GradeCategory {
+export interface GradeDefinition {
   label: string;
-  gpaValue: number;
-  targetPercent: number;
+  value: number;
+}
+
+export interface DistributionConstraint {
+  labels: string[];
+  percentRange: Range;
+}
+
+export interface GradeEngineConfig {
+  grades: GradeDefinition[];
+  aggregate: {
+    mean?: Range;
+    median?: Range;
+  };
+  distribution: DistributionConstraint[];
+  targetResultCount: number;
 }
 
 export interface ScoreGroup {
@@ -13,17 +31,15 @@ export interface ScoreGroup {
 export interface DistributionResult {
   id: string;
   meanGpa: number;
-  meanDeviation: number;
-  distributionError: number;
+  medianGpa: number;
+  compliance: {
+    mean: boolean;
+    median: boolean;
+    distribution: { label: string; compliant: boolean; actual: number }[];
+  };
   gradeCounts: Record<string, number>;
-  cutoffs: Record<string, number>; // Maps grade label to minimum score required
+  cutoffs: Record<string, number>;
   rank: number;
-}
-
-export interface GradeEngineConfig {
-  targetMean: number;
-  meanTolerance: number;
-  categories: GradeCategory[];
 }
 
 export interface ScoreInputData {

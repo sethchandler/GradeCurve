@@ -1,31 +1,32 @@
-
-import { 
-  GradeCategory, 
-  DistributionResult, 
-  GradeEngineConfig 
+import {
+  GradeEngineConfig,
+  DistributionResult,
+  Range,
+  GradeDefinition
 } from '../types';
 
 interface SearchState {
   scoreIdx: number;
-  currentPoints: number;
-  currentCount: number;
-  distError: number;
-  cutoffs: Record<string, number>;
+  totalPoints: number;
+  totalStudents: number;
   counts: Record<string, number>;
+  cutoffs: Record<string, number>;
+  medianGpa?: number;
 }
 
-/**
- * GradeCurve Engine v4.0 - Beam Search Implementation
- * High performance, non-blocking, strict GPA compliance [3.28 - 3.32].
- */
+const checkRange = (val: number, range?: Range): boolean => {
+  if (!range) return true;
+  if (range.min !== undefined && val < range.min - 0.0001) return false;
+  if (range.max !== undefined && val > range.max + 0.0001) return false;
+  return true;
+};
+
 export const calculateDistributions = (
   scores: number[],
-  config: GradeEngineConfig,
-  limit: number = 3
+  config: GradeEngineConfig
 ): DistributionResult[] => {
   if (scores.length === 0) return [];
 
-  // Group scores to ensure ties aren't split
   const scoreCounts: Record<number, number> = {};
   scores.forEach(s => { scoreCounts[s] = (scoreCounts[s] || 0) + 1; });
 
@@ -33,116 +34,137 @@ export const calculateDistributions = (
     .map(Number)
     .sort((a, b) => b - a);
 
-  const totalStudents = scores.length;
-  const minTargetPoints = 3.28 * totalStudents;
-  const maxTargetPoints = 3.32 * totalStudents;
-  
-  const gpaValues = config.categories.map(c => c.gpaValue);
-  const targetPercents = config.categories.map(c => c.targetPercent);
-  
-  // Pre-calculate target cumulative counts
-  let sumP = 0;
-  const targetCumulativeCounts = targetPercents.map(p => {
-    sumP += p;
-    return (sumP / 100) * totalStudents;
-  });
+  const N = scores.length;
+  const medianIdx = (N + 1) / 2;
+  const BEAM_WIDTH = 500; // Increased for more variety in results
 
-  // Initial state: Level 0 (A+), 0 students assigned
   let currentStates: SearchState[] = [{
     scoreIdx: 0,
-    currentPoints: 0,
-    currentCount: 0,
-    distError: 0,
-    cutoffs: {},
-    counts: {}
+    totalPoints: 0,
+    totalStudents: 0,
+    counts: {},
+    cutoffs: {}
   }];
 
-  const BEAM_WIDTH = 200; // Only keep the top 200 paths at each grade level
-
-  // Iterate through each grade category (A+ -> F)
-  for (let catIdx = 0; catIdx < config.categories.length; catIdx++) {
+  for (let catIdx = 0; catIdx < config.grades.length; catIdx++) {
     const nextStates: SearchState[] = [];
-    const isLast = catIdx === config.categories.length - 1;
-    const catLabel = config.categories[catIdx].label;
-    const targetCum = targetCumulativeCounts[catIdx];
-    const targetPct = targetPercents[catIdx];
+    const isLast = catIdx === config.grades.length - 1;
+    const grade = config.grades[catIdx];
 
     for (const state of currentStates) {
       if (isLast) {
-        // BASE CASE: Assign all remaining students to the last category (F)
-        const remainingCount = totalStudents - state.currentCount;
-        const finalPoints = state.currentPoints + (remainingCount * gpaValues[catIdx]);
-        
-        // Final GPA Check
-        if (finalPoints >= minTargetPoints - 0.0001 && finalPoints <= maxTargetPoints + 0.0001) {
-          const actualPct = (remainingCount / totalStudents) * 100;
-          const finalError = state.distError + Math.abs(actualPct - targetPct);
-          
-          nextStates.push({
-            ...state,
-            currentPoints: finalPoints,
-            currentCount: totalStudents,
-            distError: finalError,
-            cutoffs: { ...state.cutoffs, [catLabel]: sortedUniqueScores[sortedUniqueScores.length - 1] || 0 },
-            counts: { ...state.counts, [catLabel]: remainingCount }
-          });
+        const remainingCount = N - state.totalStudents;
+        const finalPoints = state.totalPoints + (remainingCount * grade.value);
+        const finalCounts = { ...state.counts, [grade.label]: remainingCount };
+        const finalCutoffs = { ...state.cutoffs, [grade.label]: sortedUniqueScores[sortedUniqueScores.length - 1] || 0 };
+
+        let finalMedian = state.medianGpa;
+        if (finalMedian === undefined) finalMedian = grade.value;
+
+        // Final Aggregate Validation
+        const mean = finalPoints / N;
+        if (checkRange(mean, config.aggregate.mean) && checkRange(finalMedian, config.aggregate.median)) {
+          // Final Distribution Validation
+          let distributionValid = true;
+          const distributionCompliance: { label: string; compliant: boolean; actual: number }[] = [];
+
+          for (const dist of config.distribution) {
+            const groupCount = dist.labels.reduce((sum, label) => sum + (finalCounts[label] || 0), 0);
+            const groupPercent = (groupCount / N) * 100;
+            const compliant = checkRange(groupPercent, dist.percentRange);
+            if (!compliant) distributionValid = false;
+            distributionCompliance.push({
+              label: dist.labels.join('+'),
+              compliant,
+              actual: parseFloat(groupPercent.toFixed(2))
+            });
+          }
+
+          if (distributionValid) {
+            nextStates.push({
+              scoreIdx: sortedUniqueScores.length,
+              totalPoints: finalPoints,
+              totalStudents: N,
+              counts: finalCounts,
+              cutoffs: finalCutoffs,
+              medianGpa: finalMedian
+            });
+          }
         }
         continue;
       }
 
       // EXPLORE: Try different cutoff points for this category
-      // Window: Center around target percentage, but allow flexibility
-      const windowSize = Math.max(12, totalStudents * 0.2); 
       let assignedInCat = 0;
-      
-      // OPTIMIZATION: Start from current scoreIdx
       for (let i = state.scoreIdx; i <= sortedUniqueScores.length; i++) {
-        const studentCountSoFar = state.currentCount + assignedInCat;
-        const diffFromTarget = Math.abs(studentCountSoFar - targetCum);
+        const nextTotalStudents = state.totalStudents + assignedInCat;
+        const nextPoints = state.totalPoints + (assignedInCat * grade.value);
 
-        if (diffFromTarget <= windowSize || i === state.scoreIdx) {
-          const nextPoints = state.currentPoints + (assignedInCat * gpaValues[catIdx]);
-          const actualPct = (assignedInCat / totalStudents) * 100;
-          
+        let nextMedian = state.medianGpa;
+        if (nextMedian === undefined && nextTotalStudents >= medianIdx) {
+          nextMedian = grade.value;
+        }
+
+        // Pruning: Mean feasibility
+        const remainingStudents = N - nextTotalStudents;
+        const minPossiblePoints = nextPoints + (remainingStudents * config.grades[config.grades.length - 1].value);
+        const maxPossiblePoints = nextPoints + (remainingStudents * config.grades[0].value);
+
+        const meanPossible = (!config.aggregate.mean) ||
+          ((!config.aggregate.mean.max || minPossiblePoints / N <= config.aggregate.mean.max + 0.0001) &&
+            (!config.aggregate.mean.min || maxPossiblePoints / N >= config.aggregate.mean.min - 0.0001));
+
+        if (meanPossible) {
           nextStates.push({
             scoreIdx: i,
-            currentPoints: nextPoints,
-            currentCount: studentCountSoFar,
-            distError: state.distError + Math.abs(actualPct - targetPct),
-            cutoffs: { ...state.cutoffs, [catLabel]: sortedUniqueScores[state.scoreIdx] || 0 },
-            counts: { ...state.counts, [catLabel]: assignedInCat }
+            totalPoints: nextPoints,
+            totalStudents: nextTotalStudents,
+            counts: { ...state.counts, [grade.label]: assignedInCat },
+            cutoffs: { ...state.cutoffs, [grade.label]: sortedUniqueScores[state.scoreIdx] || 0 },
+            medianGpa: nextMedian
           });
         }
 
         if (i < sortedUniqueScores.length) {
           assignedInCat += scoreCounts[sortedUniqueScores[i]];
         }
-        
-        // Break if we are far past the cumulative window
-        if (studentCountSoFar > targetCum + windowSize) break;
       }
     }
 
-    // PRUNING: Keep only the best BEAM_WIDTH states for the next level
-    // Rank by a combination of distribution error and "estimated" GPA feasibility
-    currentStates = nextStates
-      .sort((a, b) => a.distError - b.distError)
-      .slice(0, BEAM_WIDTH);
-      
+    // Pruning/Sorting for Beam
+    // We want to keep variety but also "good" candidates.
+    // For now, let's sort by proximity to some target if provided, or just error.
+    // Since we don't have "target" percentages anymore, we might just keep them all if under BEAM_WIDTH.
+    currentStates = nextStates.slice(0, BEAM_WIDTH);
     if (currentStates.length === 0) break;
   }
 
-  // FINAL RESULTS: Sort the survivors by distribution error
-  return currentStates
-    .sort((a, b) => a.distError - b.distError)
-    .slice(0, limit)
-    .map((r, i) => ({
+  // Map to Results
+  return currentStates.map((state, i) => {
+    const meanGpa = state.totalPoints / N;
+    const distributionCompliance: { label: string; compliant: boolean; actual: number }[] = [];
+    for (const dist of config.distribution) {
+      const groupCount = dist.labels.reduce((sum, label) => sum + (state.counts[label] || 0), 0);
+      const groupPercent = (groupCount / N) * 100;
+      distributionCompliance.push({
+        label: dist.labels.join('+'),
+        compliant: checkRange(groupPercent, dist.percentRange),
+        actual: parseFloat(groupPercent.toFixed(2))
+      });
+    }
+
+    return {
       id: Math.random().toString(36).substr(2, 9),
-      meanGpa: parseFloat((r.currentPoints / totalStudents).toFixed(4)),
-      meanDeviation: Math.abs((r.currentPoints / totalStudents) - config.targetMean),
-      distributionError: parseFloat(r.distError.toFixed(2)),
-      gradeCounts: r.counts,
-      cutoffs: r.cutoffs,
+      meanGpa: parseFloat(meanGpa.toFixed(4)),
+      medianGpa: state.medianGpa || 0,
+      compliance: {
+        mean: checkRange(meanGpa, config.aggregate.mean),
+        median: checkRange(state.medianGpa || 0, config.aggregate.median),
+        distribution: distributionCompliance
+      },
+      gradeCounts: state.counts,
+      cutoffs: state.cutoffs,
       rank: i + 1
-    }));
+    };
+  }).slice(0, config.targetResultCount);
 };

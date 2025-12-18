@@ -11,7 +11,12 @@ import defaultConfig from './config.json';
 import { calculateDistributions } from './services/gradeEngine';
 
 const App: React.FC = () => {
-  const [scores, setScores] = useState<number[]>([]);
+  const [scores, setScores] = useState<number[]>([
+    97, 97, 91, 90, 90, 89, 89, 88, 87, 87, 86, 86, 86, 86, 85, 85, 85, 85, 84, 84, 84,
+    83, 83, 83, 82, 82, 82, 82, 81, 81, 81, 81, 80, 80, 80, 80, 79, 79, 79, 78, 78, 78,
+    78, 78, 77, 76, 76, 76, 76, 75, 75, 75, 75, 74, 74, 74, 74, 74, 73, 72, 72, 70, 70,
+    70, 69, 69, 68, 66, 65, 63, 63, 62, 61, 60, 60, 59, 55, 51, 77
+  ]);
   const [config, setConfig] = useState<GradeEngineConfig>(defaultConfig as GradeEngineConfig);
   const [results, setResults] = useState<DistributionResult[]>([]);
   const [isCalculated, setIsCalculated] = useState(false);

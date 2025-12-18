@@ -10,7 +10,7 @@
         },
         {
             "label": "A-",
-            "value": 3.667
+            "value": 3.666
         },
         {
             "label": "B+",
@@ -22,7 +22,7 @@
         },
         {
             "label": "B-",
-            "value": 2.667
+            "value": 2.666
         },
         {
             "label": "C+",
@@ -34,7 +34,7 @@
         },
         {
             "label": "C-",
-            "value": 1.667
+            "value": 1.666
         },
         {
             "label": "D",
@@ -58,8 +58,8 @@
                 "A"
             ],
             "percentRange": {
-                "min": 11,
-                "max": 13
+                "min": 10,
+                "max": 14
             }
         },
         {
@@ -108,7 +108,7 @@
             ],
             "percentRange": {
                 "min": 1,
-                "max": 3
+                "max": 4
             }
         }
     ],

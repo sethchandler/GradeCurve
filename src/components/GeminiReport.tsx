@@ -92,7 +92,7 @@ export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey }) =
         setError(null);
         try {
             const genAI = new GoogleGenerativeAI(apiKey);
-            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); // Using a standard stable model name
+            const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
 
             const statsSummary = results.map((r, idx) => ({
                 name: `Scenario ${idx + 1}`,

@@ -10,6 +10,7 @@ import { EMORY_LAW_CONFIG } from './constants';
 import { GradeEngineConfig, DistributionResult, ScoreRow } from './types';
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
+import { saveFile } from './utils/fileExport';
 
 const App: React.FC = () => {
   const [step, setStep] = useState<0 | 1 | 2>(0);
@@ -48,7 +49,7 @@ const App: React.FC = () => {
     setStep(2);
   };
 
-  const exportResults = (format: 'csv' | 'xlsx') => {
+  const exportResults = async (format: 'csv' | 'xlsx') => {
     const exportData = rawData.map(row => {
       const newRow: any = {};
       preservedColumns.forEach(col => { newRow[col] = row[col]; });
@@ -60,18 +61,12 @@ const App: React.FC = () => {
       return newRow;
     });
 
+    const baseFilename = (filename || 'results').replace(/\.[^/.]+$/, "");
+
     if (format === 'csv') {
       const csv = Papa.unparse(exportData);
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.style.display = 'none';
-      link.href = url;
-      link.download = `Grades_${filename || 'results'}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      await saveFile(blob, `GradeCurve_Grades_${baseFilename}.csv`);
     } else {
       const wb = XLSX.utils.book_new();
 
@@ -92,20 +87,9 @@ const App: React.FC = () => {
       const wsSummary = XLSX.utils.json_to_sheet(summaryData);
       XLSX.utils.book_append_sheet(wb, wsSummary, "Compliance Summary");
 
-      const baseFilename = (filename || 'results').replace(/\.[^/.]+$/, "");
-
-      // Robust Excel download trigger for GitHub Pages
       const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-      const blob = new Blob([wbout], { type: 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.style.display = 'none';
-      link.href = url;
-      link.download = `GradeCurve_Report_${baseFilename}.xlsx`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      await saveFile(blob, `GradeCurve_Report_${baseFilename}.xlsx`);
     }
   };
 

@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { DistributionResult } from '../types';
+import { saveFile } from '../utils/fileExport';
 
 interface GeminiReportProps {
     results: DistributionResult[];
@@ -18,18 +19,10 @@ export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey, onA
     const [error, setError] = useState<string | null>(null);
     const reportRef = useRef<HTMLDivElement>(null);
 
-    const downloadMarkdown = () => {
+    const downloadMarkdown = async () => {
         if (!report) return;
         const blob = new Blob([report], { type: 'text/markdown' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = url;
-        a.download = `GradeCurve_AI_Report_${new Date().toISOString().split('T')[0]}.md`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        await saveFile(blob, `GradeCurve_AI_Report_${new Date().toISOString().split('T')[0]}.md`);
     };
 
     const downloadPdf = async () => {
@@ -53,8 +46,8 @@ export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey, onA
                 }
             });
 
-            // Switch to JPEG compression for drastic size reduction
-            const imgData = canvas.toDataURL('image/jpeg', 0.82);
+            // Use high-quality JPEG compression for drastic size reduction
+            const imgData = canvas.toDataURL('image/jpeg', 0.85);
             const pdf = new jsPDF({
                 orientation: 'p',
                 unit: 'mm',
@@ -85,7 +78,9 @@ export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey, onA
                 position -= pageHeight;
             }
 
-            pdf.save(`GradeCurve_AI_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+            const fileName = `GradeCurve_AI_Report_${new Date().toISOString().split('T')[0]}.pdf`;
+            const pdfBlob = pdf.output('blob');
+            await saveFile(pdfBlob, fileName);
         } catch (err) {
             console.error("PDF generation failed", err);
             setError("Failed to generate styled PDF.");

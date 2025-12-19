@@ -113,7 +113,7 @@ const App: React.FC = () => {
         {step === 0 && (
           <div className="max-w-2xl mx-auto">
             <div className="text-center mb-12">
-              <h2 className="text-4xl font-black text-slate-900 mb-4 tracking-tight">Rigorous Grading for Higher Ed</h2>
+              <h2 className="text-4xl font-black text-slate-900 mb-4 tracking-tight">Convert raw scores to grades based on constraints</h2>
               <p className="text-lg text-slate-500">Upload your class roster to generate mathematically sound, monotonic grade distributions.</p>
             </div>
             <FileUploader onDataLoaded={handleDataLoaded} onRawScoresInput={handleRawScores} />

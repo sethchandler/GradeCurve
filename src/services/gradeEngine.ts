@@ -11,174 +11,193 @@ const checkRange = (val: number, range?: Range): boolean => {
   return true;
 };
 
+/**
+ * Top-N Dynamic Programming Algorithm for Optimal Discrete Grading
+ * Implementation of the framework defined by Seth J. Chandler (2025).
+ */
 export const calculateDistributions = (
   scores: number[],
   config: GradeEngineConfig
 ): DistributionResult[] => {
   if (scores.length === 0) return [];
 
+  // 1. Pre-Processing: Aggregate scores into unique score blocks (Section 2.1)
   const scoreCounts: Record<number, number> = {};
   scores.forEach(s => { scoreCounts[s] = (scoreCounts[s] || 0) + 1; });
-
-  const sortedUniqueScores = Object.keys(scoreCounts)
-    .map(Number)
-    .sort((a, b) => b - a);
-
+  const uniqueScores = Object.keys(scoreCounts).map(Number).sort((a, b) => b - a);
+  const K = uniqueScores.length;
   const N = scores.length;
   const grades = config.grades;
   const tiers = config.distribution;
-  const targetCount = config.targetResultCount;
+  const BUFFER_N = 60; // N in the Top-N algorithm
+  const GAP_PENALTY = 50; // Penalty per skipped grade category within the distribution
 
-  const solutions: { cutoffs: Record<string, number>; mean: number; counts: Record<string, number>; score: number }[] = [];
+  const prefixCounts = new Array(K + 1).fill(0);
+  for (let i = 0; i < K; i++) prefixCounts[i + 1] = prefixCounts[i] + scoreCounts[uniqueScores[i]];
 
-  // Helper to find tier index for a grade label
-  const getTierIdx = (label: string) => tiers.findIndex(t => t.labels.includes(label));
+  // Map each grade to its Tier index
+  const gradeToTierIdx = grades.map(g => tiers.findIndex(t => t.labels.includes(g.label)));
+  // Identify where tiers finish for validation
+  const isTierEnd = grades.map((_, i) => i === grades.length - 1 || gradeToTierIdx[i] !== gradeToTierIdx[i + 1]);
 
-  // Exhaustive search over tier cutoffs (similar to Python logic)
-  const numUnique = sortedUniqueScores.length;
+  interface Path {
+    sumGpa: number;
+    cumTierPenalty: number;
+    prevK: number;
+    tierStartK: number; // Block index where current tier started
+    counts: number[];
+    cutoffs: number[]; // Unique score index per grade
+    hasStarted: boolean; // True if we have assigned students to a grade already
+    pendingGaps: number; // Count of grades assigned 0 students since the last non-zero grade
+  }
 
-  // Since we have 6 tiers usually, we need 5 cutoffs among unique scores
-  // However, we need to handle arbitrary tiers.
-  const numTiers = tiers.length;
+  // 2. DP Trellis: dp[consumed_blocks] stores BUFFER_N paths
+  let dp: Path[][] = Array.from({ length: K + 1 }, () => []);
+  dp[0] = [{ sumGpa: 0, cumTierPenalty: 0, prevK: -1, tierStartK: 0, counts: [], cutoffs: [], hasStarted: false, pendingGaps: 0 }];
 
-  const searchTiers = (tierIdx: number, startScoreIdx: number, currentTierCounts: number[], currentPath: number[]) => {
-    if (solutions.length >= targetCount * 5) return; // Search a bit more to find best ones
+  // 3. Sequential Decision Process per Grade Level (Section 3)
+  for (let gIdx = 0; gIdx < grades.length; gIdx++) {
+    const nextDp: Path[][] = Array.from({ length: K + 1 }, () => []);
+    const gVal = grades[gIdx].value;
+    const tierIdx = gradeToTierIdx[gIdx];
 
-    if (tierIdx === numTiers - 1) {
-      const lastTierCount = N - currentTierCounts.reduce((a, b) => a + b, 0);
-      const percent = (lastTierCount / N) * 100;
-      if (checkRange(percent, tiers[tierIdx].percentRange)) {
-        // Found a valid tier distribution. Now split A+/A etc. if needed?
-        // Actually, let's keep it simple: within each tier, we use the first grade primarily
-        // unless we need to split to hit the mean (especially for A+/A).
-        processTierDistribution(currentPath.concat(numUnique), currentTierCounts.concat(lastTierCount));
-      }
-      return;
-    }
+    for (let prevK = 0; prevK <= K; prevK++) {
+      if (dp[prevK].length === 0) continue;
 
-    for (let endIdx = startScoreIdx + 1; endIdx <= numUnique - (numTiers - 1 - tierIdx); endIdx++) {
-      const count = sortedUniqueScores.slice(startScoreIdx, endIdx).reduce((sum, s) => sum + scoreCounts[s], 0);
-      const percent = (count / N) * 100;
-      if (checkRange(percent, tiers[tierIdx].percentRange)) {
-        searchTiers(tierIdx + 1, endIdx, currentTierCounts.concat(count), currentPath.concat(endIdx));
-      }
-    }
-  };
+      for (let currK = prevK; currK <= K; currK++) {
+        const consumed = prefixCounts[currK] - prefixCounts[prevK];
+        const addedGpa = consumed * gVal;
+        const isEnd = isTierEnd[gIdx];
 
-  const processTierDistribution = (tierCutoffs: number[], tierCounts: number[]) => {
-    // For the A+/A tier (Tier 0), we explore splitting
-    const t0Labels = tiers[0].labels;
-    const t0UniqueRange = sortedUniqueScores.slice(0, tierCutoffs[0]);
+        for (const p of dp[prevK]) {
+          const totalInTier = (prefixCounts[currK] - prefixCounts[p.tierStartK]);
+          const tierPercent = (totalInTier / N) * 100;
 
-    // Calculate base points from all other tiers (using first grade in each tier)
-    let basePoints = 0;
-    const tierGrades: string[] = [];
-    for (let i = 1; i < numTiers; i++) {
-      const gradeLabel = tiers[i].labels[0];
-      const gradeVal = grades.find(g => g.label === gradeLabel)?.value || 0;
-      basePoints += tierCounts[i] * gradeVal;
-      tierGrades[i] = gradeLabel;
-    }
+          // Soft Constraint Penalty (Section 2.2)
+          let penalty = p.cumTierPenalty;
 
-    // Try splitting Tier 0 into the grades it contains (usually A+ and A)
-    // Monotonically: Top X unique scores get first grade, rest get second, etc.
-    // For simplicity, we assume Tier 0 has max 2 grades (A+, A)
-    const g1 = grades.find(g => g.label === t0Labels[0]);
-    const g2 = grades.find(g => g.label === t0Labels[1]) || g1;
+          // Gap Penalty: Penalize skipping grades within the range
+          let currentPendingGaps = p.pendingGaps;
+          let currentHasStarted = p.hasStarted;
 
-    if (!g1 || !g2) return;
+          if (consumed > 0) {
+            if (currentHasStarted && currentPendingGaps > 0) {
+              penalty += currentPendingGaps * GAP_PENALTY;
+            }
+            currentHasStarted = true;
+            currentPendingGaps = 0;
+          } else if (currentHasStarted) {
+            currentPendingGaps++;
+          }
 
-    for (let splitIdx = 0; splitIdx <= t0UniqueRange.length; splitIdx++) {
-      const g1Count = t0UniqueRange.slice(0, splitIdx).reduce((sum, s) => sum + scoreCounts[s], 0);
-      const g2Count = tierCounts[0] - g1Count;
+          if (isEnd) {
+            const range = tiers[tierIdx].percentRange;
+            if (range.min !== undefined && tierPercent < range.min) {
+              penalty += (range.min - tierPercent) * 10; // High weight for band excursion
+            } else if (range.max !== undefined && tierPercent > range.max) {
+              penalty += (tierPercent - range.max) * 10;
+            }
 
-      const totalPoints = basePoints + (g1Count * g1.value) + (g2Count * g2.value);
-      const mean = totalPoints / N;
+            // Add distance to center for smoother gradients
+            const target = ((range.min || 0) + (range.max || 0)) / 2;
+            penalty += Math.abs(tierPercent - target);
+          }
 
-      if (checkRange(mean, config.aggregate.mean)) {
-        // Calculate a score to rank solutions (closer to 3.30 is better)
-        const targetMean = ((config.aggregate.mean?.min || 0) + (config.aggregate.mean?.max || 0)) / 2 || 3.30;
-        const distError = tierCounts.reduce((err: number, count, idx) => {
-          const target = ((tiers[idx].percentRange.min || 0) + (tiers[idx].percentRange.max || 0)) / 2;
-          return err + Math.abs((count / N) * 100 - target);
-        }, 0);
-
-        const solutionScore = distError + Math.abs(mean - targetMean) * 100;
-
-        const finalCutoffs: Record<string, number> = {};
-        const gradeCounts: Record<string, number> = {};
-        const scoreMap: Record<number, string> = {};
-
-        // Tier 0
-        t0UniqueRange.forEach((s, idx) => {
-          const label = idx < splitIdx ? g1.label : g2.label;
-          scoreMap[s] = label;
-          if (finalCutoffs[label] === undefined) finalCutoffs[label] = s;
-          gradeCounts[label] = (gradeCounts[label] || 0) + scoreCounts[s];
-        });
-
-        // Other Tiers
-        let currentIdx = tierCutoffs[0];
-        for (let i = 1; i < numTiers; i++) {
-          const label = tierGrades[i];
-          const tierScores = sortedUniqueScores.slice(currentIdx, tierCutoffs[i]);
-          tierScores.forEach(s => {
-            scoreMap[s] = label;
-            if (finalCutoffs[label] === undefined) finalCutoffs[label] = s;
-            gradeCounts[label] = (gradeCounts[label] || 0) + scoreCounts[s];
+          nextDp[currK].push({
+            sumGpa: p.sumGpa + addedGpa,
+            cumTierPenalty: penalty,
+            prevK: prevK,
+            tierStartK: isEnd ? currK : p.tierStartK,
+            counts: [...p.counts, consumed],
+            cutoffs: [...p.cutoffs, currK === prevK ? -1 : prevK],
+            hasStarted: currentHasStarted,
+            pendingGaps: currentPendingGaps
           });
-          currentIdx = tierCutoffs[i];
         }
-
-        solutions.push({
-          cutoffs: finalCutoffs,
-          mean,
-          counts: gradeCounts,
-          score: solutionScore
-        });
       }
     }
-  };
 
-  searchTiers(0, 0, [], []);
+    // Leaderboard Pruning: Keep N most promising paths per state
+    const targetMean = ((config.aggregate.mean?.min || 0) + (config.aggregate.mean?.max || 0)) / 2 || 3.30;
+    for (let k = 0; k <= K; k++) {
+      if (nextDp[k].length > BUFFER_N) {
+        nextDp[k].sort((a, b) => {
+          // Rank by distribution penalty + proximity to mean potential
+          const aMean = a.sumGpa / N;
+          const bMean = b.sumGpa / N;
+          const aScore = a.cumTierPenalty + Math.abs(aMean - targetMean) * 5;
+          const bScore = b.cumTierPenalty + Math.abs(bMean - targetMean) * 5;
+          return aScore - bScore;
+        });
+        nextDp[k] = nextDp[k].slice(0, BUFFER_N);
+      }
+    }
+    dp = nextDp;
+  }
 
-  // Sort by score and return top N
+  // 4. Extract Resulting Distributions
+  const solutions = dp[K].filter(p => checkRange(p.sumGpa / N, config.aggregate.mean));
+  const targetMean = ((config.aggregate.mean?.min || 0) + (config.aggregate.mean?.max || 0)) / 2 || 3.30;
+
   return solutions
-    .sort((a, b) => a.score - b.score)
-    .slice(0, targetCount)
-    .map((sol, i) => {
-      const compliance: DistributionResult['compliance'] = {
-        mean: checkRange(sol.mean, config.aggregate.mean),
-        median: true, // simplified
-        distribution: tiers.map(t => {
-          const count = t.labels.reduce((sum, l) => sum + (sol.counts[l] || 0), 0);
-          const percent = (count / N) * 100;
-          return {
-            label: t.labels.join('+'),
-            compliant: checkRange(percent, t.percentRange),
-            actual: parseFloat(percent.toFixed(2))
-          };
-        })
-      };
-
+    .sort((a, b) => {
+      const aMean = a.sumGpa / N;
+      const bMean = b.sumGpa / N;
+      return (a.cumTierPenalty + Math.abs(aMean - targetMean) * 10) - (b.cumTierPenalty + Math.abs(bMean - targetMean) * 10);
+    })
+    .slice(0, config.targetResultCount)
+    .map((p, rank) => {
+      const gradeCounts: Record<string, number> = {};
+      const scoreCutoffs: Record<string, number> = {};
       const scoreMap: Record<number, string> = {};
-      sortedUniqueScores.forEach(s => {
-        for (const grade of grades) {
-          if (sol.cutoffs[grade.label] !== undefined && s >= sol.cutoffs[grade.label]) {
-            scoreMap[s] = grade.label;
+
+      grades.forEach((g, i) => {
+        gradeCounts[g.label] = p.counts[i];
+        if (p.cutoffs[i] !== -1) {
+          scoreCutoffs[g.label] = uniqueScores[p.cutoffs[i]];
+        }
+      });
+
+      // Monotonic mapping
+      uniqueScores.forEach((s) => {
+        for (let i = 0; i < grades.length; i++) {
+          const cutoffScore = scoreCutoffs[grades[i].label];
+          if (cutoffScore !== undefined && s >= cutoffScore - 0.0001) {
+            scoreMap[s] = grades[i].label;
             break;
           }
         }
       });
 
+      // Calculate Median accurately
+      const allAssignedValues: number[] = [];
+      grades.forEach((g, i) => {
+        for (let j = 0; j < p.counts[i]; j++) allAssignedValues.push(g.value);
+      });
+      allAssignedValues.sort((a, b) => b - a);
+      const mid = Math.floor(N / 2);
+      const median = N % 2 !== 0 ? allAssignedValues[mid] : (allAssignedValues[mid - 1] + allAssignedValues[mid]) / 2;
+
       return {
         id: Math.random().toString(36).substr(2, 9),
-        meanGpa: parseFloat(sol.mean.toFixed(4)),
-        medianGpa: 0, // todo: calculate accurately if needed
-        compliance,
-        gradeCounts: sol.counts,
-        cutoffs: sol.cutoffs,
-        rank: i + 1,
+        meanGpa: parseFloat((p.sumGpa / N).toFixed(4)),
+        medianGpa: parseFloat(median.toFixed(4)),
+        compliance: {
+          mean: true,
+          median: true,
+          distribution: tiers.map(t => {
+            const count = t.labels.reduce((acc, lbl) => acc + (gradeCounts[lbl] || 0), 0);
+            const actual = (count / N) * 100;
+            return {
+              label: t.labels.join('+'),
+              actual: parseFloat(actual.toFixed(2)),
+              compliant: checkRange(actual, t.percentRange)
+            };
+          })
+        },
+        gradeCounts,
+        cutoffs: scoreCutoffs,
+        rank: rank + 1,
         scoreMap
       };
     });

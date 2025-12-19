@@ -29,9 +29,34 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onDataLoaded, onRawS
             const data = await file.arrayBuffer();
             const workbook = XLSX.read(data);
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-            const jsonData = XLSX.utils.sheet_to_json(firstSheet);
-            const columns = jsonData.length > 0 ? Object.keys(jsonData[0] as object) : [];
-            onDataLoaded(jsonData as any[], columns, filename);
+
+            // Get all rows as arrays to find the real header
+            const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as any[][];
+
+            // Heuristic: The header row is the first row that has > 2 non-empty cells
+            // This skips title rows like "Law 550-001, Torts" which often only occupy one cell
+            let headerIndex = rows.findIndex(row =>
+                row.filter(cell => cell !== null && cell !== undefined && String(cell).trim() !== '').length > 2
+            );
+
+            // If no such row found, fallback to the very first row with data
+            if (headerIndex === -1) headerIndex = 0;
+
+            const headerRow = rows[headerIndex].map(h => String(h || '').trim());
+            const dataRows = rows.slice(headerIndex + 1);
+
+            const jsonData = dataRows
+                .filter(row => row.some(cell => cell !== null && cell !== undefined && cell !== ''))
+                .map(row => {
+                    const obj: any = {};
+                    headerRow.forEach((label, i) => {
+                        if (label) obj[label] = row[i];
+                    });
+                    return obj;
+                });
+
+            const columns = headerRow.filter(h => h !== '');
+            onDataLoaded(jsonData, columns, filename);
         } else {
             // Fallback: treat as text file with scores
             const text = await file.text();

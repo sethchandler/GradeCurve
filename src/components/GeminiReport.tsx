@@ -18,29 +18,41 @@ export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey }) =
         setError(null);
         try {
             const genAI = new GoogleGenerativeAI(apiKey);
-            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
 
-            const statsSummary = results.map(r => ({
-                id: r.id,
+            const statsSummary = results.map((r, idx) => ({
+                name: `Scenario ${idx + 1}`,
                 mean: r.meanGpa,
                 cutoffs: r.cutoffs,
                 compliance: r.compliance
             }));
 
-            const prompt = `As a pedagogical consultant for a Law Professor, evaluate these 3 proposed grade distributions. 
+            const prompt = `As a pedagogical consultant for a Law Professor, evaluate these ${results.length} proposed grade distributions. 
       The target mean is around 3.3. 
       Data: ${JSON.stringify(statsSummary)}
-      Discuss:
-      1. Which distribution is most balanced?
-      2. Any potential "weirdness" (e.g. large clusters) for students or faculty.
-      3. Suggestions for refinement.
-      Keep it professional, concise, and insightful.`;
+      
+      The grading algorithm has already handled the mathematical optimization to meet constraints. Your role is NOT to suggest different cutoffs or mathematical changes.
+      
+      Instead, provide a qualitative "Pedagogical Audit" for each Scenario:
+      1. Highlight Positive Features: What makes this distribution "fair" or "balanced" from a student perspective?
+      2. Identify Anomalies: Note any interesting clusters, gaps, or "tails" in the distribution that might affect student morale or faculty review.
+      
+      Refer to distributions as "Scenario 1", "Scenario 2", etc.
+      Keep your analysis professional, concise, and focused on pedagogical signaling rather than math.`;
 
             const result = await model.generateContent(prompt);
             const response = await result.response;
             setReport(response.text());
-        } catch (err) {
-            setError("Failed to generate AI report. Please check your API key.");
+        } catch (err: any) {
+            let userMessage = "Failed to generate AI report.";
+            if (err.message?.includes("API key not valid")) {
+                userMessage += " Your API key appears to be invalid.";
+            } else if (err.message) {
+                userMessage += ` Error: ${err.message}`;
+            } else {
+                userMessage += " Please check your connection and API key.";
+            }
+            setError(userMessage);
             console.error(err);
         } finally {
             setLoading(false);

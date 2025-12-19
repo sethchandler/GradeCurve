@@ -107,7 +107,7 @@ const App: React.FC = () => {
               placeholder="Gemini API Key (Optional)"
               className="px-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 w-48"
               value={geminiApiKey}
-              onChange={(e) => setGeminiApiKey(e.target.value)}
+              onChange={(e) => setGeminiApiKey(e.target.value.trim())}
             />
             {step > 0 && (
               <button onClick={() => setStep(0)} className="text-sm font-bold text-slate-500 hover:text-indigo-600">START OVER</button>

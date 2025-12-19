@@ -63,10 +63,15 @@ const App: React.FC = () => {
     if (format === 'csv') {
       const csv = Papa.unparse(exportData);
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
+      link.style.display = 'none';
+      link.href = url;
       link.download = `Grades_${filename || 'results'}.csv`;
+      document.body.appendChild(link);
       link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
     } else {
       const wb = XLSX.utils.book_new();
 
@@ -87,7 +92,20 @@ const App: React.FC = () => {
       const wsSummary = XLSX.utils.json_to_sheet(summaryData);
       XLSX.utils.book_append_sheet(wb, wsSummary, "Compliance Summary");
 
-      XLSX.writeFile(wb, `GradeCurve_Report_${filename || 'results'}.xlsx`);
+      const baseFilename = (filename || 'results').replace(/\.[^/.]+$/, "");
+
+      // Robust Excel download trigger for GitHub Pages
+      const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([wbout], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.style.display = 'none';
+      link.href = url;
+      link.download = `GradeCurve_Report_${baseFilename}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
     }
   };
 
@@ -158,7 +176,7 @@ const App: React.FC = () => {
               </div>
               <div className="space-y-8">
                 <DistributionChart results={results} config={config} />
-                <GeminiReport results={results} apiKey={geminiApiKey} onApiKeyChange={setGeminiApiKey} />
+                <GeminiReport results={results} apiKey={geminiApiKey} onApiKeyChange={(val) => setGeminiApiKey(val)} />
               </div>
             </div>
           </div>

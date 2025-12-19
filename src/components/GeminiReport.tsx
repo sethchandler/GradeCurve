@@ -23,9 +23,12 @@ export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey, onA
         const blob = new Blob([report], { type: 'text/markdown' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
+        a.style.display = 'none';
         a.href = url;
         a.download = `GradeCurve_AI_Report_${new Date().toISOString().split('T')[0]}.md`;
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
         URL.revokeObjectURL(url);
     };
 
@@ -36,44 +39,48 @@ export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey, onA
         try {
             // Capture the element as a canvas
             const canvas = await html2canvas(reportRef.current, {
-                scale: 2, // Higher resolution
+                scale: 1.5, // Crisp enough but significantly reduces file size (from 18MB to ~1MB)
                 useCORS: true,
-                backgroundColor: '#0f172a', // Match the UI theme for a premium "dark mode" PDF look
+                backgroundColor: '#0f172a',
                 logging: false,
                 onclone: (clonedDoc) => {
-                    // Ensure the cloned element is fully expanded for the snapshot
                     const el = clonedDoc.querySelector('[data-report-container]') as HTMLElement;
                     if (el) {
                         el.style.maxHeight = 'none';
                         el.style.overflow = 'visible';
+                        el.style.padding = '40px';
                     }
                 }
             });
 
-            const imgData = canvas.toDataURL('image/png');
-            const pdf = new jsPDF('p', 'mm', 'a4');
+            // Switch to JPEG compression for drastic size reduction
+            const imgData = canvas.toDataURL('image/jpeg', 0.82);
+            const pdf = new jsPDF({
+                orientation: 'p',
+                unit: 'mm',
+                format: 'a4',
+                compress: true
+            });
 
             const imgProps = pdf.getImageProperties(imgData);
             const pdfWidth = pdf.internal.pageSize.getWidth();
             const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
 
-            // Add a clean header
-            pdf.setFillColor(79, 70, 229); // indigo-600
+            pdf.setFillColor(79, 70, 229);
             pdf.rect(0, 0, pdfWidth, 20, 'F');
             pdf.setTextColor(255, 255, 255);
             pdf.setFontSize(14);
             pdf.text("GradeCurve Pro: AI Pedagogical Audit", 10, 13);
 
-            pdf.addImage(imgData, 'PNG', 0, 20, pdfWidth, pdfHeight);
+            pdf.addImage(imgData, 'JPEG', 0, 20, pdfWidth, pdfHeight, undefined, 'FAST');
 
-            // Handle multi-page if content is too long
             const pageHeight = pdf.internal.pageSize.getHeight();
             let heightLeft = pdfHeight + 20 - pageHeight;
             let position = -(pageHeight - 20);
 
             while (heightLeft > 0) {
                 pdf.addPage();
-                pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
+                pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight, undefined, 'FAST');
                 heightLeft -= pageHeight;
                 position -= pageHeight;
             }
@@ -81,7 +88,7 @@ export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey, onA
             pdf.save(`GradeCurve_AI_Report_${new Date().toISOString().split('T')[0]}.pdf`);
         } catch (err) {
             console.error("PDF generation failed", err);
-            setError("Failed to generate styled PDF. Try downloading Markdown instead.");
+            setError("Failed to generate styled PDF.");
         } finally {
             setLoading(false);
         }

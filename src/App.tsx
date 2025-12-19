@@ -50,6 +50,7 @@ const App: React.FC = () => {
   };
 
   const exportResults = async (format: 'csv' | 'xlsx') => {
+    // 1. Prepare data (Synchronous and fast)
     const exportData = rawData.map(row => {
       const newRow: any = {};
       preservedColumns.forEach(col => { newRow[col] = row[col]; });
@@ -61,20 +62,18 @@ const App: React.FC = () => {
       return newRow;
     });
 
-    const baseFilename = (filename || 'results').replace(/\.[^/.]+$/, "");
+    const baseFilename = (filename || 'results').replace(/\.[^/.]+$/, "").replace(/[^a-z0-9-_]/gi, '_');
 
+    // 2. Trigger SAVE AS Dialog immediately to preserve user gesture
     if (format === 'csv') {
       const csv = Papa.unparse(exportData);
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       await saveFile(blob, `GradeCurve_Grades_${baseFilename}.csv`);
     } else {
       const wb = XLSX.utils.book_new();
-
-      // Sheet 1: Student Grades
       const wsGrades = XLSX.utils.json_to_sheet(exportData);
       XLSX.utils.book_append_sheet(wb, wsGrades, "Student Grades");
 
-      // Sheet 2: Compliance Summary
       const summaryData = results.map(res => ({
         Scenario: `Scenario ${res.rank}`,
         MeanGPA: res.meanGpa,
@@ -166,6 +165,12 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      <footer className="max-w-7xl mx-auto px-6 py-8 border-t border-slate-200 mt-20 text-center">
+        <p className="text-xs text-slate-400 font-mono lowercase tracking-tighter">
+          Build: {new Date().toLocaleString()} | Version: 1.0.4-SaveFix
+        </p>
+      </footer>
     </div>
   );
 };

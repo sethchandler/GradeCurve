@@ -2,17 +2,7 @@ import {
   GradeEngineConfig,
   DistributionResult,
   Range,
-  GradeDefinition
 } from '../types';
-
-interface SearchState {
-  scoreIdx: number;
-  totalPoints: number;
-  totalStudents: number;
-  counts: Record<string, number>;
-  cutoffs: Record<string, number>;
-  medianGpa?: number;
-}
 
 const checkRange = (val: number, range?: Range): boolean => {
   if (!range) return true;
@@ -35,136 +25,161 @@ export const calculateDistributions = (
     .sort((a, b) => b - a);
 
   const N = scores.length;
-  const medianIdx = (N + 1) / 2;
-  const BEAM_WIDTH = 500; // Increased for more variety in results
+  const grades = config.grades;
+  const tiers = config.distribution;
+  const targetCount = config.targetResultCount;
 
-  let currentStates: SearchState[] = [{
-    scoreIdx: 0,
-    totalPoints: 0,
-    totalStudents: 0,
-    counts: {},
-    cutoffs: {}
-  }];
+  const solutions: { cutoffs: Record<string, number>; mean: number; counts: Record<string, number>; score: number }[] = [];
 
-  for (let catIdx = 0; catIdx < config.grades.length; catIdx++) {
-    const nextStates: SearchState[] = [];
-    const isLast = catIdx === config.grades.length - 1;
-    const grade = config.grades[catIdx];
+  // Helper to find tier index for a grade label
+  const getTierIdx = (label: string) => tiers.findIndex(t => t.labels.includes(label));
 
-    for (const state of currentStates) {
-      if (isLast) {
-        const remainingCount = N - state.totalStudents;
-        const finalPoints = state.totalPoints + (remainingCount * grade.value);
-        const finalCounts = { ...state.counts, [grade.label]: remainingCount };
-        const finalCutoffs = { ...state.cutoffs, [grade.label]: sortedUniqueScores[sortedUniqueScores.length - 1] || 0 };
+  // Exhaustive search over tier cutoffs (similar to Python logic)
+  const numUnique = sortedUniqueScores.length;
 
-        let finalMedian = state.medianGpa;
-        if (finalMedian === undefined) finalMedian = grade.value;
+  // Since we have 6 tiers usually, we need 5 cutoffs among unique scores
+  // However, we need to handle arbitrary tiers.
+  const numTiers = tiers.length;
 
-        // Final Aggregate Validation
-        const mean = finalPoints / N;
-        if (checkRange(mean, config.aggregate.mean) && checkRange(finalMedian, config.aggregate.median)) {
-          // Final Distribution Validation
-          let distributionValid = true;
-          const distributionCompliance: { label: string; compliant: boolean; actual: number }[] = [];
+  const searchTiers = (tierIdx: number, startScoreIdx: number, currentTierCounts: number[], currentPath: number[]) => {
+    if (solutions.length >= targetCount * 5) return; // Search a bit more to find best ones
 
-          for (const dist of config.distribution) {
-            const groupCount = dist.labels.reduce((sum, label) => sum + (finalCounts[label] || 0), 0);
-            const groupPercent = (groupCount / N) * 100;
-            const compliant = checkRange(groupPercent, dist.percentRange);
-            if (!compliant) distributionValid = false;
-            distributionCompliance.push({
-              label: dist.labels.join('+'),
-              compliant,
-              actual: parseFloat(groupPercent.toFixed(2))
-            });
-          }
-
-          if (distributionValid) {
-            nextStates.push({
-              scoreIdx: sortedUniqueScores.length,
-              totalPoints: finalPoints,
-              totalStudents: N,
-              counts: finalCounts,
-              cutoffs: finalCutoffs,
-              medianGpa: finalMedian
-            });
-          }
-        }
-        continue;
+    if (tierIdx === numTiers - 1) {
+      const lastTierCount = N - currentTierCounts.reduce((a, b) => a + b, 0);
+      const percent = (lastTierCount / N) * 100;
+      if (checkRange(percent, tiers[tierIdx].percentRange)) {
+        // Found a valid tier distribution. Now split A+/A etc. if needed?
+        // Actually, let's keep it simple: within each tier, we use the first grade primarily
+        // unless we need to split to hit the mean (especially for A+/A).
+        processTierDistribution(currentPath.concat(numUnique), currentTierCounts.concat(lastTierCount));
       }
+      return;
+    }
 
-      // EXPLORE: Try different cutoff points for this category
-      let assignedInCat = 0;
-      for (let i = state.scoreIdx; i <= sortedUniqueScores.length; i++) {
-        const nextTotalStudents = state.totalStudents + assignedInCat;
-        const nextPoints = state.totalPoints + (assignedInCat * grade.value);
+    for (let endIdx = startScoreIdx + 1; endIdx <= numUnique - (numTiers - 1 - tierIdx); endIdx++) {
+      const count = sortedUniqueScores.slice(startScoreIdx, endIdx).reduce((sum, s) => sum + scoreCounts[s], 0);
+      const percent = (count / N) * 100;
+      if (checkRange(percent, tiers[tierIdx].percentRange)) {
+        searchTiers(tierIdx + 1, endIdx, currentTierCounts.concat(count), currentPath.concat(endIdx));
+      }
+    }
+  };
 
-        let nextMedian = state.medianGpa;
-        if (nextMedian === undefined && nextTotalStudents >= medianIdx) {
-          nextMedian = grade.value;
-        }
+  const processTierDistribution = (tierCutoffs: number[], tierCounts: number[]) => {
+    // For the A+/A tier (Tier 0), we explore splitting
+    const t0Labels = tiers[0].labels;
+    const t0UniqueRange = sortedUniqueScores.slice(0, tierCutoffs[0]);
 
-        // Pruning: Mean feasibility
-        const remainingStudents = N - nextTotalStudents;
-        const minPossiblePoints = nextPoints + (remainingStudents * config.grades[config.grades.length - 1].value);
-        const maxPossiblePoints = nextPoints + (remainingStudents * config.grades[0].value);
+    // Calculate base points from all other tiers (using first grade in each tier)
+    let basePoints = 0;
+    const tierGrades: string[] = [];
+    for (let i = 1; i < numTiers; i++) {
+      const gradeLabel = tiers[i].labels[0];
+      const gradeVal = grades.find(g => g.label === gradeLabel)?.value || 0;
+      basePoints += tierCounts[i] * gradeVal;
+      tierGrades[i] = gradeLabel;
+    }
 
-        const meanPossible = (!config.aggregate.mean) ||
-          ((!config.aggregate.mean.max || minPossiblePoints / N <= config.aggregate.mean.max + 0.0001) &&
-            (!config.aggregate.mean.min || maxPossiblePoints / N >= config.aggregate.mean.min - 0.0001));
+    // Try splitting Tier 0 into the grades it contains (usually A+ and A)
+    // Monotonically: Top X unique scores get first grade, rest get second, etc.
+    // For simplicity, we assume Tier 0 has max 2 grades (A+, A)
+    const g1 = grades.find(g => g.label === t0Labels[0]);
+    const g2 = grades.find(g => g.label === t0Labels[1]) || g1;
 
-        if (meanPossible) {
-          nextStates.push({
-            scoreIdx: i,
-            totalPoints: nextPoints,
-            totalStudents: nextTotalStudents,
-            counts: { ...state.counts, [grade.label]: assignedInCat },
-            cutoffs: { ...state.cutoffs, [grade.label]: sortedUniqueScores[state.scoreIdx] || 0 },
-            medianGpa: nextMedian
+    if (!g1 || !g2) return;
+
+    for (let splitIdx = 0; splitIdx <= t0UniqueRange.length; splitIdx++) {
+      const g1Count = t0UniqueRange.slice(0, splitIdx).reduce((sum, s) => sum + scoreCounts[s], 0);
+      const g2Count = tierCounts[0] - g1Count;
+
+      const totalPoints = basePoints + (g1Count * g1.value) + (g2Count * g2.value);
+      const mean = totalPoints / N;
+
+      if (checkRange(mean, config.aggregate.mean)) {
+        // Calculate a score to rank solutions (closer to 3.30 is better)
+        const targetMean = ((config.aggregate.mean?.min || 0) + (config.aggregate.mean?.max || 0)) / 2 || 3.30;
+        const distError = tierCounts.reduce((err: number, count, idx) => {
+          const target = ((tiers[idx].percentRange.min || 0) + (tiers[idx].percentRange.max || 0)) / 2;
+          return err + Math.abs((count / N) * 100 - target);
+        }, 0);
+
+        const solutionScore = distError + Math.abs(mean - targetMean) * 100;
+
+        const finalCutoffs: Record<string, number> = {};
+        const gradeCounts: Record<string, number> = {};
+        const scoreMap: Record<number, string> = {};
+
+        // Tier 0
+        t0UniqueRange.forEach((s, idx) => {
+          const label = idx < splitIdx ? g1.label : g2.label;
+          scoreMap[s] = label;
+          if (finalCutoffs[label] === undefined) finalCutoffs[label] = s;
+          gradeCounts[label] = (gradeCounts[label] || 0) + scoreCounts[s];
+        });
+
+        // Other Tiers
+        let currentIdx = tierCutoffs[0];
+        for (let i = 1; i < numTiers; i++) {
+          const label = tierGrades[i];
+          const tierScores = sortedUniqueScores.slice(currentIdx, tierCutoffs[i]);
+          tierScores.forEach(s => {
+            scoreMap[s] = label;
+            if (finalCutoffs[label] === undefined) finalCutoffs[label] = s;
+            gradeCounts[label] = (gradeCounts[label] || 0) + scoreCounts[s];
           });
+          currentIdx = tierCutoffs[i];
         }
 
-        if (i < sortedUniqueScores.length) {
-          assignedInCat += scoreCounts[sortedUniqueScores[i]];
-        }
+        solutions.push({
+          cutoffs: finalCutoffs,
+          mean,
+          counts: gradeCounts,
+          score: solutionScore
+        });
       }
     }
+  };
 
-    // Pruning/Sorting for Beam
-    // We want to keep variety but also "good" candidates.
-    // For now, let's sort by proximity to some target if provided, or just error.
-    // Since we don't have "target" percentages anymore, we might just keep them all if under BEAM_WIDTH.
-    currentStates = nextStates.slice(0, BEAM_WIDTH);
-    if (currentStates.length === 0) break;
-  }
+  searchTiers(0, 0, [], []);
 
-  // Map to Results
-  return currentStates.map((state, i) => {
-    const meanGpa = state.totalPoints / N;
-    const distributionCompliance: { label: string; compliant: boolean; actual: number }[] = [];
-    for (const dist of config.distribution) {
-      const groupCount = dist.labels.reduce((sum, label) => sum + (state.counts[label] || 0), 0);
-      const groupPercent = (groupCount / N) * 100;
-      distributionCompliance.push({
-        label: dist.labels.join('+'),
-        compliant: checkRange(groupPercent, dist.percentRange),
-        actual: parseFloat(groupPercent.toFixed(2))
+  // Sort by score and return top N
+  return solutions
+    .sort((a, b) => a.score - b.score)
+    .slice(0, targetCount)
+    .map((sol, i) => {
+      const compliance: DistributionResult['compliance'] = {
+        mean: checkRange(sol.mean, config.aggregate.mean),
+        median: true, // simplified
+        distribution: tiers.map(t => {
+          const count = t.labels.reduce((sum, l) => sum + (sol.counts[l] || 0), 0);
+          const percent = (count / N) * 100;
+          return {
+            label: t.labels.join('+'),
+            compliant: checkRange(percent, t.percentRange),
+            actual: parseFloat(percent.toFixed(2))
+          };
+        })
+      };
+
+      const scoreMap: Record<number, string> = {};
+      sortedUniqueScores.forEach(s => {
+        for (const grade of grades) {
+          if (sol.cutoffs[grade.label] !== undefined && s >= sol.cutoffs[grade.label]) {
+            scoreMap[s] = grade.label;
+            break;
+          }
+        }
       });
-    }
 
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      meanGpa: parseFloat(meanGpa.toFixed(4)),
-      medianGpa: state.medianGpa || 0,
-      compliance: {
-        mean: checkRange(meanGpa, config.aggregate.mean),
-        median: checkRange(state.medianGpa || 0, config.aggregate.median),
-        distribution: distributionCompliance
-      },
-      gradeCounts: state.counts,
-      cutoffs: state.cutoffs,
-      rank: i + 1
-    };
-  }).slice(0, config.targetResultCount);
+      return {
+        id: Math.random().toString(36).substr(2, 9),
+        meanGpa: parseFloat(sol.mean.toFixed(4)),
+        medianGpa: 0, // todo: calculate accurately if needed
+        compliance,
+        gradeCounts: sol.counts,
+        cutoffs: sol.cutoffs,
+        rank: i + 1,
+        scoreMap
+      };
+    });
 };

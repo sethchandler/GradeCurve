@@ -1,156 +1,176 @@
-
-import React, { useState, useCallback } from 'react';
-import ScoreInput from './components/ScoreInput';
-import SettingsPanel from './components/SettingsPanel';
-import ResultCard from './components/ResultCard';
-import {
-  GradeEngineConfig,
-  DistributionResult
-} from './types';
-import defaultConfig from './config.json';
+import React, { useState } from 'react';
+import { SettingsPanel } from './components/SettingsPanel';
+import { DistributionChart } from './components/DistributionChart';
+import { ResultCard } from './components/ResultCard';
+import { FileUploader } from './components/FileUploader';
+import { ColumnMapper } from './components/ColumnMapper';
+import { GeminiReport } from './components/GeminiReport';
 import { calculateDistributions } from './services/gradeEngine';
+import { EMORY_LAW_CONFIG } from './constants';
+import { GradeEngineConfig, DistributionResult, ScoreRow } from './types';
+import * as XLSX from 'xlsx';
+import Papa from 'papaparse';
 
 const App: React.FC = () => {
-  const [scores, setScores] = useState<number[]>([
-    97, 97, 91, 90, 90, 89, 89, 88, 87, 87, 86, 86, 86, 86, 85, 85, 85, 85, 84, 84, 84,
-    83, 83, 83, 82, 82, 82, 82, 81, 81, 81, 81, 80, 80, 80, 80, 79, 79, 79, 78, 78, 78,
-    78, 78, 77, 76, 76, 76, 76, 75, 75, 75, 75, 74, 74, 74, 74, 74, 73, 72, 72, 70, 70,
-    70, 69, 69, 68, 66, 65, 63, 63, 62, 61, 60, 60, 59, 55, 51, 77
-  ]);
-  const [config, setConfig] = useState<GradeEngineConfig>(defaultConfig as GradeEngineConfig);
+  const [step, setStep] = useState<0 | 1 | 2>(0);
+  const [rawData, setRawData] = useState<ScoreRow[]>([]);
+  const [columns, setColumns] = useState<string[]>([]);
+  const [filename, setFilename] = useState<string>('');
+  const [scoreColumn, setScoreColumn] = useState<string>('');
+  const [preservedColumns, setPreservedColumns] = useState<string[]>([]);
+  const [config, setConfig] = useState<GradeEngineConfig>(EMORY_LAW_CONFIG);
+  const [geminiApiKey, setGeminiApiKey] = useState<string>('');
   const [results, setResults] = useState<DistributionResult[]>([]);
-  const [isCalculated, setIsCalculated] = useState(false);
-  const [isComputing, setIsComputing] = useState(false);
 
-  const runCalculation = useCallback((activeScores: number[], currentConfig: GradeEngineConfig) => {
-    if (activeScores.length === 0) return;
-    setIsComputing(true);
-
-    // Defer to prevent blocking the UI thread
-    setTimeout(() => {
-      try {
-        const newResults = calculateDistributions(activeScores, currentConfig);
-        setResults(newResults);
-        setIsCalculated(true);
-      } catch (err) {
-        console.error("Calculation failed", err);
-      } finally {
-        setIsComputing(false);
-      }
-    }, 10);
-  }, []);
-
-  const handleGenerate = (loadedScores?: number[]) => {
-    const activeScores = loadedScores || scores;
-    if (activeScores.length === 0) return;
-    setScores(activeScores);
-    runCalculation(activeScores, config);
+  const handleDataLoaded = (data: ScoreRow[], cols: string[], name: string) => {
+    setRawData(data);
+    setColumns(cols);
+    setFilename(name);
+    setStep(1);
+    const scoreCol = cols.find(c => /score|grade|points|raw/i.test(c)) || '';
+    setScoreColumn(scoreCol);
+    setPreservedColumns(cols.filter(c => c !== scoreCol));
   };
 
-  const handleConfigChange = (newConfig: GradeEngineConfig) => {
-    setConfig(newConfig);
+  const handleRawScores = (name: string, scores: number[]) => {
+    const data = scores.map(s => ({ "Raw Score": s, __raw_score__: s }));
+    handleDataLoaded(data, ["Raw Score"], name);
+    setScoreColumn("Raw Score");
   };
 
-  const handleApplyConfig = () => {
-    if (scores.length > 0) {
-      runCalculation(scores, config);
+  const handleGenerate = () => {
+    const rawScores = rawData.map(d => {
+      const val = Number(d[scoreColumn]);
+      return isNaN(val) ? 0 : val;
+    });
+    const calculated = calculateDistributions(rawScores, config);
+    setResults(calculated);
+    setStep(2);
+  };
+
+  const exportResults = (format: 'csv' | 'xlsx') => {
+    const exportData = rawData.map(row => {
+      const newRow: any = {};
+      preservedColumns.forEach(col => { newRow[col] = row[col]; });
+      newRow[scoreColumn] = row[scoreColumn];
+      results.forEach((res, i) => {
+        const score = Number(row[scoreColumn]);
+        newRow[`Scenario ${i + 1} Grade`] = res.scoreMap[score] || 'F';
+      });
+      return newRow;
+    });
+
+    if (format === 'csv') {
+      const csv = Papa.unparse(exportData);
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `Grades_${filename || 'results'}.csv`;
+      link.click();
+    } else {
+      const wb = XLSX.utils.book_new();
+
+      // Sheet 1: Student Grades
+      const wsGrades = XLSX.utils.json_to_sheet(exportData);
+      XLSX.utils.book_append_sheet(wb, wsGrades, "Student Grades");
+
+      // Sheet 2: Compliance Summary
+      const summaryData = results.map(res => ({
+        Scenario: `Scenario ${res.rank}`,
+        MeanGPA: res.meanGpa,
+        Status: res.compliance.mean ? "Compliant" : "Non-Compliant",
+        ...res.compliance.distribution.reduce((acc, d) => ({
+          ...acc,
+          [`${d.label} (%)`]: d.actual
+        }), {})
+      }));
+      const wsSummary = XLSX.utils.json_to_sheet(summaryData);
+      XLSX.utils.book_append_sheet(wb, wsSummary, "Compliance Summary");
+
+      XLSX.writeFile(wb, `GradeCurve_Report_${filename || 'results'}.xlsx`);
     }
   };
 
-  const hasData = scores.length > 0;
-
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-      <header className="mb-12 flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div>
-          <h1 className="text-5xl font-black text-slate-900 tracking-tight">GradeCurve Pro</h1>
-          <p className="mt-2 text-lg text-slate-500 max-w-2xl font-medium">
-            Generalized grading engine supporting arbitrary aggregate and distributional constraints.
-          </p>
-        </div>
-        <div className="shrink-0">
-          <div className="flex items-center gap-2 text-slate-400 text-xs font-bold uppercase tracking-widest bg-slate-100 px-4 py-2 rounded-full">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            Live Assignment Engine
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-20">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-50 backdrop-blur-md bg-white/80">
+        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-tr from-indigo-600 to-purple-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+              <span className="font-black text-xl">G</span>
+            </div>
+            <h1 className="text-xl font-black tracking-tight text-slate-800">GradeCurve <span className="text-indigo-600">Pro</span></h1>
+          </div>
+          <div className="flex items-center gap-6">
+            <input
+              type="password"
+              placeholder="Gemini API Key (Optional)"
+              className="px-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 w-48"
+              value={geminiApiKey}
+              onChange={(e) => setGeminiApiKey(e.target.value)}
+            />
+            {step > 0 && (
+              <button onClick={() => setStep(0)} className="text-sm font-bold text-slate-500 hover:text-indigo-600">START OVER</button>
+            )}
           </div>
         </div>
       </header>
 
-      <main className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
-        <aside className="xl:col-span-4 space-y-8">
-          <ScoreInput onScoresLoaded={handleGenerate} />
-          <SettingsPanel config={config} onChange={handleConfigChange} onApply={handleApplyConfig} />
+      <main className="max-w-7xl mx-auto px-6 pt-12">
+        {step === 0 && (
+          <div className="max-w-2xl mx-auto">
+            <div className="text-center mb-12">
+              <h2 className="text-4xl font-black text-slate-900 mb-4 tracking-tight">Rigorous Grading for Higher Ed</h2>
+              <p className="text-lg text-slate-500">Upload your class roster to generate mathematically sound, monotonic grade distributions.</p>
+            </div>
+            <FileUploader onDataLoaded={handleDataLoaded} onRawScoresInput={handleRawScores} />
+          </div>
+        )}
 
-          {hasData && (
-            <div className="bg-slate-900 text-white p-6 rounded-2xl shadow-xl">
-              <div className="flex items-center gap-4">
-                <div className="text-3xl font-black text-blue-400">{scores.length}</div>
-                <div>
-                  <div className="text-[10px] font-bold text-slate-500 uppercase">Students Loaded</div>
-                  <div className="text-xs text-slate-300">Mean Score: {(scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1)}</div>
-                </div>
-              </div>
+        {step === 1 && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2">
+              <ColumnMapper
+                columns={columns}
+                scoreColumn={scoreColumn}
+                preservedColumns={preservedColumns}
+                onSetScoreColumn={setScoreColumn}
+                onTogglePreserved={(col) => setPreservedColumns(prev => prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col])}
+                onProceed={handleGenerate}
+              />
             </div>
-          )}
-        </aside>
+            <div className="lg:col-span-1">
+              <SettingsPanel config={config} onUpdate={setConfig} />
+            </div>
+          </div>
+        )}
 
-        <section className="xl:col-span-8 space-y-8">
-          {isComputing ? (
-            <div className="h-96 flex flex-col items-center justify-center bg-white border border-slate-100 rounded-3xl shadow-sm">
-              <div className="relative w-16 h-16">
-                <div className="absolute inset-0 border-4 border-slate-100 rounded-full"></div>
-                <div className="absolute inset-0 border-4 border-blue-600 rounded-full border-t-transparent animate-spin"></div>
+        {step === 2 && (
+          <div className="space-y-12 animate-in fade-in duration-700">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-3xl font-black text-slate-900">Distribution Results</h2>
+                <p className="text-slate-500">Analyzing {results.length} valid scenarios based on {rawData.length} records.</p>
               </div>
-              <h3 className="mt-6 text-xl font-bold text-slate-800">Assigning Grades...</h3>
-              <p className="text-slate-400 text-sm mt-1">Exploring possible distributions</p>
-            </div>
-          ) : !isCalculated ? (
-            <div className="h-96 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-3xl bg-slate-50/50 p-10 text-center">
-              <div className="w-16 h-16 bg-white border border-slate-200 text-blue-600 rounded-2xl flex items-center justify-center mb-6 shadow-sm">
-                <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"></path></svg>
+              <div className="flex gap-3">
+                <button onClick={() => exportResults('csv')} className="px-6 py-3 bg-white border border-slate-200 rounded-xl font-bold hover:text-indigo-600 flex items-center gap-2">DOWNLOAD CSV</button>
+                <button onClick={() => exportResults('xlsx')} className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 shadow-lg flex items-center gap-2">DOWNLOAD EXCEL</button>
               </div>
-              <h3 className="text-xl font-bold text-slate-800">Ready for Distribution</h3>
-              <p className="text-slate-500 mt-2 max-w-sm">
-                Enter student scores and define your constraints to generate compliant distributions.
-              </p>
             </div>
-          ) : (
-            <div className="space-y-8">
-              <div className="flex items-center justify-between px-2">
-                <h2 className="text-2xl font-bold text-slate-900">Compliant Distributions</h2>
-                <div className="text-xs font-bold text-slate-400 bg-slate-100 px-3 py-1 rounded-lg uppercase tracking-wider">
-                  {results.length} Found
-                </div>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+              <div className="space-y-6">
+                {results.map((res) => (
+                  <ResultCard key={res.id} result={res} config={config} />
+                ))}
               </div>
-
-              {results.length === 0 ? (
-                <div className="bg-amber-50 border border-amber-200 p-10 rounded-3xl text-center">
-                  <div className="w-12 h-12 bg-amber-200 text-amber-700 rounded-full flex items-center justify-center mx-auto mb-4 font-bold text-xl">!</div>
-                  <h3 className="text-amber-900 font-bold text-lg">No Distributions Found</h3>
-                  <p className="text-amber-700 text-sm mt-2 max-w-md mx-auto">
-                    We couldn't find an assignment that satisfies all your constraints.
-                    Try <strong>loosening the ranges</strong> or checking your score data.
-                  </p>
-                </div>
-              ) : (
-                results.map((res) => (
-                  <ResultCard
-                    key={res.id}
-                    result={res}
-                    config={config}
-                    rawScores={scores}
-                  />
-                ))
-              )}
+              <div className="space-y-8">
+                <DistributionChart results={results} config={config} />
+                <GeminiReport results={results} apiKey={geminiApiKey} />
+              </div>
             </div>
-          )
-          }
-        </section>
+          </div>
+        )}
       </main>
-
-      <footer className="mt-20 py-10 border-t border-slate-200 text-center text-slate-400 text-xs font-medium uppercase tracking-widest">
-        GradeCurve Pro — Academic Compliance Utility
-      </footer>
     </div>
   );
 };

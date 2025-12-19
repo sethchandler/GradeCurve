@@ -23,6 +23,17 @@ export interface GradeEngineConfig {
   targetResultCount: number;
 }
 
+export interface ScoreRow {
+  [key: string]: any;
+  __raw_score__: number;
+}
+
+export interface WebAppConfig extends GradeEngineConfig {
+  scoreColumn: string;
+  preservedColumns: string[];
+  geminiApiKey?: string;
+}
+
 export interface ScoreGroup {
   score: number;
   count: number;
@@ -40,6 +51,7 @@ export interface DistributionResult {
   gradeCounts: Record<string, number>;
   cutoffs: Record<string, number>;
   rank: number;
+  scoreMap: Record<number, string>; // Maps raw score to grade label
 }
 
 export interface ScoreInputData {

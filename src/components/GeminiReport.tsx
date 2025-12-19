@@ -1,4 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { DistributionResult } from '../types';
 
@@ -11,6 +15,76 @@ export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey }) =
     const [report, setReport] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const reportRef = useRef<HTMLDivElement>(null);
+
+    const downloadMarkdown = () => {
+        if (!report) return;
+        const blob = new Blob([report], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `GradeCurve_AI_Report_${new Date().toISOString().split('T')[0]}.md`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const downloadPdf = async () => {
+        if (!report || !reportRef.current) return;
+
+        setLoading(true);
+        try {
+            // Capture the element as a canvas
+            const canvas = await html2canvas(reportRef.current, {
+                scale: 2, // Higher resolution
+                useCORS: true,
+                backgroundColor: '#0f172a', // Match the UI theme for a premium "dark mode" PDF look
+                logging: false,
+                onclone: (clonedDoc) => {
+                    // Ensure the cloned element is fully expanded for the snapshot
+                    const el = clonedDoc.querySelector('[data-report-container]') as HTMLElement;
+                    if (el) {
+                        el.style.maxHeight = 'none';
+                        el.style.overflow = 'visible';
+                    }
+                }
+            });
+
+            const imgData = canvas.toDataURL('image/png');
+            const pdf = new jsPDF('p', 'mm', 'a4');
+
+            const imgProps = pdf.getImageProperties(imgData);
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+            // Add a clean header
+            pdf.setFillColor(79, 70, 229); // indigo-600
+            pdf.rect(0, 0, pdfWidth, 20, 'F');
+            pdf.setTextColor(255, 255, 255);
+            pdf.setFontSize(14);
+            pdf.text("GradeCurve Pro: AI Pedagogical Audit", 10, 13);
+
+            pdf.addImage(imgData, 'PNG', 0, 20, pdfWidth, pdfHeight);
+
+            // Handle multi-page if content is too long
+            const pageHeight = pdf.internal.pageSize.getHeight();
+            let heightLeft = pdfHeight + 20 - pageHeight;
+            let position = -(pageHeight - 20);
+
+            while (heightLeft > 0) {
+                pdf.addPage();
+                pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, pdfHeight);
+                heightLeft -= pageHeight;
+                position -= pageHeight;
+            }
+
+            pdf.save(`GradeCurve_AI_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+        } catch (err) {
+            console.error("PDF generation failed", err);
+            setError("Failed to generate styled PDF. Try downloading Markdown instead.");
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const generateReport = async () => {
         if (!apiKey) return;
@@ -18,7 +92,7 @@ export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey }) =
         setError(null);
         try {
             const genAI = new GoogleGenerativeAI(apiKey);
-            const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); // Using a standard stable model name
 
             const statsSummary = results.map((r, idx) => ({
                 name: `Scenario ${idx + 1}`,
@@ -38,7 +112,8 @@ export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey }) =
       2. Identify Anomalies: Note any interesting clusters, gaps, or "tails" in the distribution that might affect student morale or faculty review.
       
       Refer to distributions as "Scenario 1", "Scenario 2", etc.
-      Keep your analysis professional, concise, and focused on pedagogical signaling rather than math.`;
+      Keep your analysis professional, concise, and focused on pedagogical signaling rather than math. 
+      Format your response with Markdown (headers, bullet points, and strong text) for a professional report layout.`;
 
             const result = await model.generateContent(prompt);
             const response = await result.response;
@@ -76,19 +151,47 @@ export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey }) =
                 </div>
 
                 {report ? (
-                    <div className="prose prose-invert max-w-none animate-in fade-in slide-in-from-bottom-2">
-                        <div className="bg-white/5 rounded-2xl p-6 border border-white/10 backdrop-blur-sm whitespace-pre-wrap leading-relaxed text-indigo-50/90 font-medium">
-                            {report}
-                        </div>
-                        <button
-                            onClick={() => setReport(null)}
-                            className="mt-6 text-indigo-300 hover:text-white text-sm font-bold flex items-center gap-2 group/btn"
+                    <div className="animate-in fade-in slide-in-from-bottom-2">
+                        <div
+                            ref={reportRef}
+                            data-report-container
+                            className="bg-slate-900/50 rounded-2xl p-8 border border-white/10 backdrop-blur-sm whitespace-normal leading-relaxed text-indigo-50/90 overflow-y-auto max-h-[500px] custom-scrollbar prose prose-invert prose-indigo max-w-none"
                         >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 transform group-hover/btn:-rotate-180 transition-transform duration-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                            </svg>
-                            Regenerate Analysis
-                        </button>
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {report}
+                            </ReactMarkdown>
+                        </div>
+                        <div className="mt-6 flex flex-wrap items-center gap-4">
+                            <button
+                                onClick={() => setReport(null)}
+                                className="text-indigo-300 hover:text-white text-sm font-bold flex items-center gap-2 group/btn"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 transform group-hover/btn:-rotate-180 transition-transform duration-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                REGENERATE
+                            </button>
+                            <div className="h-4 w-px bg-white/10 mx-2"></div>
+                            <button
+                                onClick={downloadMarkdown}
+                                className="text-indigo-300 hover:text-white text-[10px] font-black tracking-widest uppercase py-2 px-4 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 transition-all flex items-center gap-2"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                                MARKDOWN
+                            </button>
+                            <button
+                                onClick={downloadPdf}
+                                disabled={loading}
+                                className="text-indigo-900 bg-indigo-300 hover:bg-white text-[10px] font-black tracking-widest uppercase py-2 px-4 rounded-lg transition-all flex items-center gap-2"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16h16M4 12h16m-7-4l3 3m0 0l-3 3m3-3H4" />
+                                </svg>
+                                {loading ? 'PREPARING PDF...' : 'EXPORT PREMIUM PDF'}
+                            </button>
+                        </div>
                     </div>
                 ) : (
                     <div className="text-center py-8">

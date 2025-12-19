@@ -102,13 +102,6 @@ const App: React.FC = () => {
             <h1 className="text-xl font-black tracking-tight text-slate-800">GradeCurve <span className="text-indigo-600">Pro</span></h1>
           </div>
           <div className="flex items-center gap-6">
-            <input
-              type="password"
-              placeholder="Gemini API Key (Optional)"
-              className="px-4 py-2 bg-slate-100 border-none rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 w-48"
-              value={geminiApiKey}
-              onChange={(e) => setGeminiApiKey(e.target.value.trim())}
-            />
             {step > 0 && (
               <button onClick={() => setStep(0)} className="text-sm font-bold text-slate-500 hover:text-indigo-600">START OVER</button>
             )}
@@ -165,7 +158,7 @@ const App: React.FC = () => {
               </div>
               <div className="space-y-8">
                 <DistributionChart results={results} config={config} />
-                <GeminiReport results={results} apiKey={geminiApiKey} />
+                <GeminiReport results={results} apiKey={geminiApiKey} onApiKeyChange={setGeminiApiKey} />
               </div>
             </div>
           </div>

@@ -9,9 +9,10 @@ import { DistributionResult } from '../types';
 interface GeminiReportProps {
     results: DistributionResult[];
     apiKey?: string;
+    onApiKeyChange: (value: string) => void;
 }
 
-export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey }) => {
+export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey, onApiKeyChange }) => {
     const [report, setReport] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -87,7 +88,10 @@ export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey }) =
     };
 
     const generateReport = async () => {
-        if (!apiKey) return;
+        if (!apiKey) {
+            setError("Please provide a Gemini API Key to run the analysis.");
+            return;
+        }
         setLoading(true);
         setError(null);
         try {
@@ -133,8 +137,6 @@ export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey }) =
             setLoading(false);
         }
     };
-
-    if (!apiKey) return null;
 
     return (
         <div className="mt-8 bg-gradient-to-br from-indigo-900 to-slate-900 rounded-3xl p-8 text-white shadow-2xl relative overflow-hidden group">
@@ -195,9 +197,29 @@ export const GeminiReport: React.FC<GeminiReportProps> = ({ results, apiKey }) =
                     </div>
                 ) : (
                     <div className="text-center py-8">
-                        <p className="text-indigo-200 mb-8 max-w-md mx-auto leading-relaxed">
-                            Use Gemini AI to analyze these scenarios from a pedagogical perspective and identify potential friction points for faculty or students.
+                        <p className="text-indigo-200 mb-6 max-w-md mx-auto leading-relaxed">
+                            Use Gemini AI to analyze these scenarios from a pedagogical perspective.
+                            <strong> A Gemini API Key is required to run this feature.</strong>
                         </p>
+
+                        <div className="max-w-xs mx-auto mb-8">
+                            <input
+                                type="password"
+                                placeholder="Paste your Gemini API Key here"
+                                className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-sm focus:ring-2 focus:ring-indigo-400 outline-none placeholder:text-indigo-300/50 text-white text-center"
+                                value={apiKey || ''}
+                                onChange={(e) => onApiKeyChange(e.target.value.trim())}
+                            />
+                            <a
+                                href="https://aistudio.google.com/app/apikey"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[10px] text-indigo-300 hover:text-white mt-2 block font-bold transition-colors"
+                            >
+                                GET AN API KEY FREE →
+                            </a>
+                        </div>
+
                         <button
                             onClick={generateReport}
                             disabled={loading}

@@ -158,18 +158,25 @@ export const calculateDistributions = (
         }
       });
 
-      // Monotonic mapping - map ALL scores to grades
-      // Even if a grade has 0 students, we need to know what scores WOULD get that grade
+      // Build a sorted list of all defined cutoffs for monotonic mapping
+      const definedCutoffs: Array<{ grade: string; cutoff: number }> = [];
+      grades.forEach(g => {
+        if (scoreCutoffs[g.label] !== undefined) {
+          definedCutoffs.push({ grade: g.label, cutoff: scoreCutoffs[g.label] });
+        }
+      });
+      // Sort by cutoff descending (highest scores first)
+      definedCutoffs.sort((a, b) => b.cutoff - a.cutoff);
+
+      // Monotonic mapping - assign each score to the highest grade it qualifies for
       uniqueScores.forEach((s) => {
-        // Find the highest grade this score qualifies for
-        for (let i = 0; i < grades.length; i++) {
-          const cutoffScore = scoreCutoffs[grades[i].label];
-          if (cutoffScore !== undefined && s >= cutoffScore - 0.0001) {
-            scoreMap[s] = grades[i].label;
+        for (const { grade, cutoff } of definedCutoffs) {
+          if (s >= cutoff - 0.0001) {
+            scoreMap[s] = grade;
             break;
           }
         }
-        // If no grade was assigned (score below all cutoffs), assign lowest grade
+        // If no cutoff matched, assign to lowest grade in the scale
         if (scoreMap[s] === undefined) {
           scoreMap[s] = grades[grades.length - 1].label;
         }

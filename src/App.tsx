@@ -67,7 +67,11 @@ const App: React.FC = () => {
       newRow[scoreColumn] = row[scoreColumn];
       results.forEach((res, i) => {
         const score = Number(row[scoreColumn]);
-        newRow[`Scenario ${i + 1} Grade`] = res.scoreMap[score] || 'F';
+        const grade = res.scoreMap[score];
+        if (grade === undefined) {
+          console.warn(`[GradeCurve Export] Score ${score} not found in scoreMap for Scenario ${i + 1}. Available scores:`, Object.keys(res.scoreMap).sort((a,b) => Number(b) - Number(a)));
+        }
+        newRow[`Scenario ${i + 1} Grade`] = grade || 'F';
       });
       return newRow;
     });

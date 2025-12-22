@@ -158,14 +158,20 @@ export const calculateDistributions = (
         }
       });
 
-      // Monotonic mapping
+      // Monotonic mapping - map ALL scores to grades
+      // Even if a grade has 0 students, we need to know what scores WOULD get that grade
       uniqueScores.forEach((s) => {
+        // Find the highest grade this score qualifies for
         for (let i = 0; i < grades.length; i++) {
           const cutoffScore = scoreCutoffs[grades[i].label];
           if (cutoffScore !== undefined && s >= cutoffScore - 0.0001) {
             scoreMap[s] = grades[i].label;
             break;
           }
+        }
+        // If no grade was assigned (score below all cutoffs), assign lowest grade
+        if (scoreMap[s] === undefined) {
+          scoreMap[s] = grades[grades.length - 1].label;
         }
       });
 

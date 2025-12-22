@@ -109,7 +109,8 @@ export const calculateDistributions = (
             prevK: prevK,
             tierStartK: isEnd ? currK : p.tierStartK,
             counts: [...p.counts, consumed],
-            cutoffs: [...p.cutoffs, currK === prevK ? -1 : prevK],
+            // Store the lowest score index for this grade block.
+            cutoffs: [...p.cutoffs, currK === prevK ? -1 : currK - 1],
             hasStarted: currentHasStarted,
             pendingGaps: currentPendingGaps
           });
@@ -151,11 +152,27 @@ export const calculateDistributions = (
       const scoreCutoffs: Record<string, number> = {};
       const scoreMap: Record<number, string> = {};
 
+      // Build cutoffs - ensuring ALL grades have a cutoff if students are assigned
+      let runningTotal = 0;
       grades.forEach((g, i) => {
         gradeCounts[g.label] = p.counts[i];
-        if (p.cutoffs[i] !== -1) {
-          scoreCutoffs[g.label] = uniqueScores[p.cutoffs[i]];
+
+        // If this grade has students, it needs a cutoff
+        if (p.counts[i] > 0) {
+          // The cutoff is the lowest score that gets this grade
+          // Which is the score at the START of this grade's range
+          if (p.cutoffs[i] !== -1) {
+            scoreCutoffs[g.label] = uniqueScores[p.cutoffs[i]];
+          } else {
+            // This shouldn't happen if count > 0, but let's handle it
+            console.warn(`Grade ${g.label} has ${p.counts[i]} students but cutoff index is -1`);
+          }
+        } else if (i > 0 && p.counts[i-1] > 0 && i < grades.length - 1 && p.counts[i+1] > 0) {
+          // This grade has 0 students but is between grades with students
+          // Calculate what the cutoff WOULD be based on neighboring grades
+          // For now, we'll leave it undefined as the algorithm does
         }
+        runningTotal += p.counts[i];
       });
 
       // Build a sorted list of all defined cutoffs for monotonic mapping

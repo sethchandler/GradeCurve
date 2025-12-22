@@ -64,24 +64,39 @@ const App: React.FC = () => {
   };
 
   const exportResults = async (format: 'csv' | 'xlsx') => {
-    // 1. Prepare data (Synchronous and fast)
+    // Debug: Let's see what's actually in scoreMap
+    console.log('=== EXPORT DEBUG: scoreMap contents ===');
+    results.forEach((res, i) => {
+      console.log(`Scenario ${i + 1} scoreMap[51]:`, res.scoreMap[51]);
+      console.log(`Scenario ${i + 1} all scores in scoreMap:`, Object.keys(res.scoreMap).map(Number).sort((a,b) => b-a));
+    });
+
+    // THE SCOREMAP ALREADY HAS THE CORRECT GRADES - JUST USE IT!
     const exportData = rawData.map((row, idx) => {
       const newRow: any = {};
       preservedColumns.forEach(col => { newRow[col] = row[col]; });
       newRow[scoreColumn] = row[scoreColumn];
+
+      const score = Number(row[scoreColumn]);
+
       results.forEach((res, i) => {
-        // Use the SAME normalized score that was used for grading
-        const score = row.__normalized_score__ ?? Number(row[scoreColumn]);
-        const grade = res.scoreMap[score];
-        if (grade === undefined) {
-          console.error(`[GradeCurve Export] CRITICAL: Score ${score} not in scoreMap for Scenario ${i + 1}!`, {
-            scoreColumn,
-            rawValue: row[scoreColumn],
-            normalizedScore: row.__normalized_score__,
-            availableScores: Object.keys(res.scoreMap).map(Number).sort((a,b) => b - a).slice(0, 10)
-          });
+        // Use the scoreMap that ALREADY WORKS for the display!
+        // The scoreMap maps score -> grade label
+        let grade = res.scoreMap[score];
+
+        // Debug specific student
+        if (score === 51 || (row['Student Anonymous ID#'] == 55124)) {
+          console.log(`Student ${row['Student Anonymous ID#']} (score ${score}): Scenario ${i+1} grade = ${grade || 'NOT FOUND'}`);
         }
-        newRow[`Scenario ${i + 1} Grade`] = grade || 'F';
+
+        // If not in scoreMap (shouldn't happen), use the backup logic
+        if (!grade) {
+          console.warn(`Score ${score} not in scoreMap for Scenario ${i+1}. Using fallback.`);
+          // Fallback: assign lowest grade
+          grade = config.grades[config.grades.length - 1].label;
+        }
+
+        newRow[`Scenario ${i + 1} Grade`] = grade;
       });
       return newRow;
     });

@@ -50,9 +50,13 @@ const App: React.FC = () => {
       return;
     }
 
-    const rawScores = rawData.map(d => {
+    // Extract and normalize scores, then store them back in rawData
+    const rawScores = rawData.map((d, idx) => {
       const val = Number(d[scoreColumn]);
-      return isNaN(val) ? 0 : val;
+      const normalized = isNaN(val) ? 0 : val;
+      // Store the normalized score that will be used for grading
+      rawData[idx].__normalized_score__ = normalized;
+      return normalized;
     });
     const calculated = calculateDistributions(rawScores, config);
     setResults(calculated);
@@ -61,15 +65,21 @@ const App: React.FC = () => {
 
   const exportResults = async (format: 'csv' | 'xlsx') => {
     // 1. Prepare data (Synchronous and fast)
-    const exportData = rawData.map(row => {
+    const exportData = rawData.map((row, idx) => {
       const newRow: any = {};
       preservedColumns.forEach(col => { newRow[col] = row[col]; });
       newRow[scoreColumn] = row[scoreColumn];
       results.forEach((res, i) => {
-        const score = Number(row[scoreColumn]);
+        // Use the SAME normalized score that was used for grading
+        const score = row.__normalized_score__ ?? Number(row[scoreColumn]);
         const grade = res.scoreMap[score];
         if (grade === undefined) {
-          console.warn(`[GradeCurve Export] Score ${score} not found in scoreMap for Scenario ${i + 1}. Available scores:`, Object.keys(res.scoreMap).sort((a,b) => Number(b) - Number(a)));
+          console.error(`[GradeCurve Export] CRITICAL: Score ${score} not in scoreMap for Scenario ${i + 1}!`, {
+            scoreColumn,
+            rawValue: row[scoreColumn],
+            normalizedScore: row.__normalized_score__,
+            availableScores: Object.keys(res.scoreMap).map(Number).sort((a,b) => b - a).slice(0, 10)
+          });
         }
         newRow[`Scenario ${i + 1} Grade`] = grade || 'F';
       });

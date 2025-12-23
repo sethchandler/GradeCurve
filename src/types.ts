@@ -25,7 +25,9 @@ export interface GradeEngineConfig {
 
 export interface ScoreRow {
   [key: string]: any;
-  __raw_score__: number;
+  __raw_score__?: number;
+  __normalized_score__?: number;
+  __missing_score__?: boolean;
 }
 
 export interface WebAppConfig extends GradeEngineConfig {
@@ -43,6 +45,7 @@ export interface DistributionResult {
   id: string;
   meanGpa: number;
   medianGpa: number;
+  isFallback?: boolean;
   compliance: {
     mean: boolean;
     median: boolean;

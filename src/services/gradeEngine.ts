@@ -138,9 +138,11 @@ export const calculateDistributions = (
 
   // 4. Extract Resulting Distributions
   const solutions = dp[K].filter(p => checkRange(p.sumGpa / N, config.aggregate.mean));
+  const usedFallback = solutions.length === 0;
+  const candidates = usedFallback ? dp[K] : solutions;
   const targetMean = ((config.aggregate.mean?.min || 0) + (config.aggregate.mean?.max || 0)) / 2 || 3.30;
 
-  return solutions
+  return candidates
     .sort((a, b) => {
       const aMean = a.sumGpa / N;
       const bMean = b.sumGpa / N;
@@ -212,9 +214,10 @@ export const calculateDistributions = (
         id: Math.random().toString(36).substr(2, 9),
         meanGpa: parseFloat((p.sumGpa / N).toFixed(4)),
         medianGpa: parseFloat(median.toFixed(4)),
+        isFallback: usedFallback,
         compliance: {
-          mean: true,
-          median: true,
+          mean: checkRange(p.sumGpa / N, config.aggregate.mean),
+          median: checkRange(median, config.aggregate.median),
           distribution: tiers.map(t => {
             const count = t.labels.reduce((acc, lbl) => acc + (gradeCounts[lbl] || 0), 0);
             const actual = (count / N) * 100;

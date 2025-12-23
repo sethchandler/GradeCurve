@@ -38,7 +38,7 @@ const App: React.FC = () => {
   };
 
   const handleRawScores = (name: string, scores: number[]) => {
-    const data = scores.map(s => ({ "Raw Score": s, __raw_score__: s }));
+    const data = scores.map(s => ({ "Raw Score": s, __raw_score__: s, __normalized_score__: s, __missing_score__: false }));
     handleDataLoaded(data, ["Raw Score"], name);
     setScoreColumn("Raw Score");
   };
@@ -51,14 +51,19 @@ const App: React.FC = () => {
     }
 
     // Extract and normalize scores, then store them back in rawData
-    const rawScores = rawData.map((d, idx) => {
+    const normalizedScores: number[] = [];
+    rawData.forEach((d, idx) => {
       const val = Number(d[scoreColumn]);
-      const normalized = isNaN(val) ? 0 : val;
-      // Store the normalized score that will be used for grading
-      rawData[idx].__normalized_score__ = normalized;
-      return normalized;
+      if (Number.isFinite(val)) {
+        rawData[idx].__normalized_score__ = val;
+        rawData[idx].__missing_score__ = false;
+        normalizedScores.push(val);
+      } else {
+        rawData[idx].__normalized_score__ = undefined;
+        rawData[idx].__missing_score__ = true;
+      }
     });
-    const calculated = calculateDistributions(rawScores, config);
+    const calculated = calculateDistributions(normalizedScores, config);
     setResults(calculated);
     setStep(2);
   };
@@ -77,12 +82,16 @@ const App: React.FC = () => {
       preservedColumns.forEach(col => { newRow[col] = row[col]; });
       newRow[scoreColumn] = row[scoreColumn];
 
-      const score = Number(row[scoreColumn]);
+      const score = row.__normalized_score__;
 
       results.forEach((res, i) => {
+        if (row.__missing_score__) {
+          newRow[`Scenario ${i + 1} Grade`] = 'Missing';
+          return;
+        }
         // Use the scoreMap that ALREADY WORKS for the display!
         // The scoreMap maps score -> grade label
-        let grade = res.scoreMap[score];
+        let grade = res.scoreMap[Number(score)];
 
         // Debug specific student
         if (score === 51 || (row['Student Anonymous ID#'] == 55124)) {
@@ -190,6 +199,11 @@ const App: React.FC = () => {
                 <button onClick={() => exportResults('xlsx')} className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 shadow-lg flex items-center gap-2">DOWNLOAD EXCEL</button>
               </div>
             </div>
+            {results.some(res => res.isFallback) && (
+              <div className="border-2 border-amber-400 bg-amber-50 text-amber-900 rounded-2xl px-6 py-4 font-bold">
+                Warning: No distribution satisfies the configured constraints. Showing the closest available scenarios.
+              </div>
+            )}
             
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
               <div className="xl:col-span-2 space-y-8">

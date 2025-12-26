@@ -25,9 +25,7 @@ export interface GradeEngineConfig {
 
 export interface ScoreRow {
   [key: string]: any;
-  __raw_score__?: number;
-  __normalized_score__?: number;
-  __missing_score__?: boolean;
+  __raw_score__: number;
 }
 
 export interface WebAppConfig extends GradeEngineConfig {
@@ -45,7 +43,6 @@ export interface DistributionResult {
   id: string;
   meanGpa: number;
   medianGpa: number;
-  isFallback?: boolean;
   compliance: {
     mean: boolean;
     median: boolean;
@@ -55,6 +52,7 @@ export interface DistributionResult {
   cutoffs: Record<string, number>;
   rank: number;
   scoreMap: Record<number, string>; // Maps raw score to grade label
+  getGradeForScore?: (score: number) => string; // Function to get grade for any score
 }
 
 export interface ScoreInputData {

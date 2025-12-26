@@ -5,6 +5,7 @@ import { ResultCard } from './components/ResultCard';
 import { FileUploader } from './components/FileUploader';
 import { ColumnMapper } from './components/ColumnMapper';
 import { GeminiReport } from './components/GeminiReport';
+import { AssignmentPreview } from './components/AssignmentPreview';
 import { calculateDistributions } from './services/gradeEngine';
 import { EMORY_LAW_CONFIG } from './constants';
 import { GradeEngineConfig, DistributionResult, ScoreRow } from './types';
@@ -38,7 +39,7 @@ const App: React.FC = () => {
   };
 
   const handleRawScores = (name: string, scores: number[]) => {
-    const data = scores.map(s => ({ "Raw Score": s, __raw_score__: s, __normalized_score__: s, __missing_score__: false }));
+    const data = scores.map(s => ({ "Raw Score": s, __raw_score__: s }));
     handleDataLoaded(data, ["Raw Score"], name);
     setScoreColumn("Raw Score");
   };
@@ -50,61 +51,30 @@ const App: React.FC = () => {
       return;
     }
 
-    // Extract and normalize scores, then store them back in rawData
-    const normalizedScores: number[] = [];
-    rawData.forEach((d, idx) => {
+    const rawScores = rawData.map(d => {
       const val = Number(d[scoreColumn]);
-      if (Number.isFinite(val)) {
-        rawData[idx].__normalized_score__ = val;
-        rawData[idx].__missing_score__ = false;
-        normalizedScores.push(val);
-      } else {
-        rawData[idx].__normalized_score__ = undefined;
-        rawData[idx].__missing_score__ = true;
-      }
+      return isNaN(val) ? 0 : val;
     });
-    const calculated = calculateDistributions(normalizedScores, config);
+    console.log(`[GradeCurve] Generating distributions for ${rawScores.length} scores`);
+    console.log('[GradeCurve] Config:', config);
+    const calculated = calculateDistributions(rawScores, config);
+    console.log(`[GradeCurve] Found ${calculated.length} valid distributions`);
     setResults(calculated);
     setStep(2);
   };
 
   const exportResults = async (format: 'csv' | 'xlsx') => {
-    // Debug: Let's see what's actually in scoreMap
-    console.log('=== EXPORT DEBUG: scoreMap contents ===');
-    results.forEach((res, i) => {
-      console.log(`Scenario ${i + 1} scoreMap[51]:`, res.scoreMap[51]);
-      console.log(`Scenario ${i + 1} all scores in scoreMap:`, Object.keys(res.scoreMap).map(Number).sort((a,b) => b-a));
-    });
-
-    // THE SCOREMAP ALREADY HAS THE CORRECT GRADES - JUST USE IT!
-    const exportData = rawData.map((row, idx) => {
+    // 1. Prepare data (Synchronous and fast)
+    const exportData = rawData.map(row => {
       const newRow: any = {};
       preservedColumns.forEach(col => { newRow[col] = row[col]; });
       newRow[scoreColumn] = row[scoreColumn];
-
-      const score = row.__normalized_score__;
-
       results.forEach((res, i) => {
-        if (row.__missing_score__) {
-          newRow[`Scenario ${i + 1} Grade`] = 'Missing';
-          return;
-        }
-        // Use the scoreMap that ALREADY WORKS for the display!
-        // The scoreMap maps score -> grade label
-        let grade = res.scoreMap[Number(score)];
-
-        // Debug specific student
-        if (score === 51 || (row['Student Anonymous ID#'] == 55124)) {
-          console.log(`Student ${row['Student Anonymous ID#']} (score ${score}): Scenario ${i+1} grade = ${grade || 'NOT FOUND'}`);
-        }
-
-        // If not in scoreMap (shouldn't happen), use the backup logic
-        if (!grade) {
-          console.warn(`Score ${score} not in scoreMap for Scenario ${i+1}. Using fallback.`);
-          // Fallback: assign lowest grade
-          grade = config.grades[config.grades.length - 1].label;
-        }
-
+        const score = Number(row[scoreColumn]);
+        // Use the getGradeForScore function if available, otherwise fall back to scoreMap
+        const grade = res.getGradeForScore
+          ? res.getGradeForScore(score)
+          : (res.scoreMap[score] || 'F');
         newRow[`Scenario ${i + 1} Grade`] = grade;
       });
       return newRow;
@@ -195,15 +165,16 @@ const App: React.FC = () => {
                 <p className="text-slate-500">Analyzing {results.length} valid scenarios based on {rawData.length} records.</p>
               </div>
               <div className="flex gap-3">
+                <AssignmentPreview
+                  rawData={rawData}
+                  results={results}
+                  scoreColumn={scoreColumn}
+                  preservedColumns={preservedColumns}
+                />
                 <button onClick={() => exportResults('csv')} className="px-6 py-3 bg-white border border-slate-200 rounded-xl font-bold hover:text-indigo-600 flex items-center gap-2">DOWNLOAD CSV</button>
                 <button onClick={() => exportResults('xlsx')} className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 shadow-lg flex items-center gap-2">DOWNLOAD EXCEL</button>
               </div>
             </div>
-            {results.some(res => res.isFallback) && (
-              <div className="border-2 border-amber-400 bg-amber-50 text-amber-900 rounded-2xl px-6 py-4 font-bold">
-                Warning: No distribution satisfies the configured constraints. Showing the closest available scenarios.
-              </div>
-            )}
             
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
               <div className="xl:col-span-2 space-y-8">
